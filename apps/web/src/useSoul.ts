@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClientMessage, Emotion, ServerMessage, VoiceHints } from "@waifu/core";
+import type { Capabilities, ClientMessage, Emotion, ServerMessage, VoiceHints } from "@waifu/core";
+import { b64ToBuffer, type Clip } from "./player";
+import { serverBase } from "./net";
 
 export interface ChatLine {
   id: number;
@@ -8,25 +10,27 @@ export interface ChatLine {
 }
 
 function wsUrl(): string {
-  const params = new URLSearchParams(location.search);
-  const token = params.get("token") ?? localStorage.getItem("waifu_token") ?? "";
-  if (token) localStorage.setItem("waifu_token", token);
-  const base = import.meta.env.VITE_SERVER_URL ?? `${location.protocol === "https:" ? "wss" : "ws"}://${location.hostname}:8787`;
-  return `${base}/ws${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  const { ws, token } = serverBase();
+  return `${ws}/ws${token ? `?token=${encodeURIComponent(token)}` : ""}`;
 }
 
 /** Connection to the soul server. Sentences arrive ready for TTS. */
-export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion) => void; onInterruptedDone: () => void }) {
+export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion) => void; onAudio: (clip: Clip) => void; onInterruptedDone: () => void }) {
   const ws = useRef<WebSocket | undefined>(undefined);
   const h = useRef(handlers);
   h.current = handlers;
   const [connected, setConnected] = useState(false);
   const [name, setName] = useState("...");
   const [voice, setVoice] = useState<VoiceHints>({ lang: "es-ES", pitch: 1, rate: 1 });
+  const [caps, setCaps] = useState<Capabilities>({ tts: false, stt: false });
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [error, setError] = useState<string>();
   const nextId = useRef(1);
   const currentTurn = useRef(0);
+  // Server turn ids are sequential per connection (n-th user_text = turn n). Anything at or below
+  // `ignoreUpTo` belongs to an answer the user already cut off, so late-arriving audio is dropped.
+  const sent = useRef(0);
+  const ignoreUpTo = useRef(0);
 
   useEffect(() => {
     let closed = false;
@@ -35,6 +39,8 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
       const sock = new WebSocket(wsUrl());
       ws.current = sock;
       sock.onopen = () => {
+        sent.current = 0;
+        ignoreUpTo.current = 0;
         setConnected(true);
         setError(undefined);
       };
@@ -47,6 +53,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
         if (m.type === "ready") {
           setName(m.soul.name);
           setVoice(m.soul.voice);
+          setCaps(m.caps);
         } else if (m.type === "token") {
           // Show text live; one chat line per turn.
           setLines((ls) => {
@@ -58,7 +65,9 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
             return [...ls, { id: nextId.current++, who: "soul", text: m.text.replace(/\[emotion:[^\]]*\]?/gi, "") }];
           });
         } else if (m.type === "sentence") {
-          h.current.onSentence(m.text, m.emotion);
+          if (m.turnId > ignoreUpTo.current) h.current.onSentence(m.text, m.emotion);
+        } else if (m.type === "audio") {
+          if (m.turnId > ignoreUpTo.current) h.current.onAudio({ data: b64ToBuffer(m.data), emotion: m.emotion, text: m.text });
         } else if (m.type === "done") {
           if (m.interrupted) h.current.onInterruptedDone();
         } else if (m.type === "error") {
@@ -81,10 +90,16 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
   const sendText = useCallback(
     (text: string) => {
       setLines((ls) => [...ls, { id: nextId.current++, who: "user", text }]);
+      ignoreUpTo.current = sent.current; // a new utterance replaces whatever was being answered
+      sent.current++;
       send({ type: "user_text", text });
     },
     [send],
   );
 
-  return { connected, name, voice, lines, error, sendText, interrupt: () => send({ type: "interrupt" }) };
+  return { connected, name, voice, caps, lines, error, sendText, interrupt: () => {
+      ignoreUpTo.current = sent.current;
+      send({ type: "interrupt" });
+    },
+  };
 }

@@ -18,3 +18,10 @@ button { padding: 10px 14px; border-radius: 8px; border: 0; background: #7a5cff;
 button:disabled { opacity: .5; cursor: not-allowed; }
 button.active { background: #e0457b; }
 label { font-size: .85rem; }
+.stage { position: relative; display: flex; justify-content: center; }
+.vrm { width: 100%; height: 46dvh; max-height: 440px; min-height: 280px; border-radius: 16px; background: radial-gradient(circle at 50% 35%, #3a2f7a, #17132b 70%); }
+.vrm canvas { width: 100%; height: 100%; display: block; }
+.load-vrm { position: absolute; right: 8px; bottom: 8px; font-size: .7rem; opacity: .6; cursor: pointer; background: #0006; padding: 3px 8px; border-radius: 6px; }
+.load-vrm:hover { opacity: 1; }
+.status { color: #9d8cff; font-style: italic; }
+.mode { margin-left: auto; opacity: .5; }

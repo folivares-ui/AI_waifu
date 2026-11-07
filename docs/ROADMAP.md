@@ -5,11 +5,14 @@ Each phase is shippable on its own. Items marked (?) need a decision or verifica
 ## Phase 1 — Voice companion (DONE, this repo)
 Voice chat, avatar, soul file, memory, swappable LLM.
 
-## Phase 2 — Better senses and voice
-- Server-side STT (Whisper / faster-whisper) with VAD, and TTS engines (local e.g. Piper/XTTS (?), or cloud) behind provider interfaces, so audio no longer depends on Chrome's Web Speech.
-- Echo cancellation / proper barge-in without headphones.
-- Live2D or VRM avatar renderer implementing the existing `Avatar` props (emotion, speaking, listening), with real viseme lip-sync.
-- Memory v2: embeddings, summarisation of old conversations, forgetting/editing UI.
+## Phase 2 — Better senses and voice (DONE except where noted)
+- [x] Server-side STT/TTS behind provider interfaces (OpenAI-style endpoints, local command). Verified against fakes only.
+- [x] VAD + echo-aware barge-in (energy VAD; a neural Silero VAD is a possible upgrade).
+- [x] VRM anime avatar with expressions and audio-driven lip-sync.
+- [ ] Phoneme-accurate visemes (currently loudness-driven mouth shapes).
+- [ ] Streaming TTS (play audio before the sentence finishes synthesizing) for lower latency.
+- [ ] Memory v2: embeddings, summarisation of old conversations, forgetting/editing UI.
+- [ ] Persist a user-loaded VRM across reloads (currently only `public/avatars/default.vrm` persists).
 
 ## Phase 3 — Desktop app + remote access
 - Tauri shell (Windows/macOS) around the web client; global hotkey / push-to-talk; tray; runs the server as a sidecar (?).

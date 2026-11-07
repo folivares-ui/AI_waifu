@@ -74,6 +74,9 @@ export class Listener {
 /** Queue-based speech output; resolves state callbacks so the avatar can lip-sync. */
 export class Speaker {
   private pending = 0;
+  get busy() {
+    return this.pending > 0;
+  }
   constructor(
     private voice: VoiceHints,
     private onSpeaking: (speaking: boolean) => void,

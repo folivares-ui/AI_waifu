@@ -5,3 +5,5 @@ data/*.json
 data/*.jsonl
 *.log
 .DS_Store
+
+apps/web/public/avatars/*.vrm

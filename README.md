@@ -3,16 +3,16 @@
 Self-hosted AI companion you own: a **soul** (personality + voice + memory stored in files you control),
 a **brain** (swappable LLM: cloud or local), and **bodies** (clients: web today; desktop/mobile next).
 
-## Status: MVP (phase 1)
+## Status: phase 2 (voice + anime avatar)
 
 Works today:
-- Real-time voice conversation in the browser (speech-to-text → LLM → text-to-speech), sentence-level streaming so she starts talking before the full answer is generated.
-- Barge-in: interrupt her by talking (with headphones) or with the "Callar" button.
-- Expressive 2D avatar (emotions + lip movement). The `Avatar` component is the contract a Live2D/VRM renderer will replace.
-- Soul file (`souls/default.soul.json`) and long-term memory (`data/memory.json`, local, keyword recall).
-- Swappable brains: Anthropic API, Ollama (local), or an offline mock.
+- **Anime avatar (VRM, 3D):** renders any VRM 0.x/1.0 model with expressions (happy, sad, angry, surprised, shy, thinking), blinking, gaze, idle motion and lip-sync driven by the loudness of her actual voice. A sample model is fetched with `npm run avatar:sample`; use your own character by copying a `.vrm` to `apps/web/public/avatars/default.vrm` or with the "Cargar modelo VRM" button. Without a model a simple 2D SVG face is shown.
+- **Server-side voice pipeline:** mic → echo-cancelled capture → voice-activity detection → WAV → your STT server → LLM → sentence-by-sentence TTS → ordered audio playback. If STT/TTS are not configured, it falls back to the browser's Web Speech API / built-in voices, so nothing breaks.
+- **Barge-in:** talk over her to interrupt (VAD threshold is raised while she speaks, plus a transcript echo filter so she does not answer her own voice). "Callar" cuts audio instantly.
+- Soul file (`souls/default.soul.json`), local long-term memory (`data/memory.json`), swappable brains (Anthropic, Ollama, offline mock).
+- Security: loopback by default, `AUTH_TOKEN` required to expose it, and an Origin allowlist so other websites cannot talk to your localhost server.
 
-Not built yet (see [docs/ROADMAP.md](docs/ROADMAP.md)): screen vision, desktop/app control, game playing, streaming, desktop (Tauri) and mobile packaging, Live2D/VRM avatar, server-side STT/TTS (Whisper, ElevenLabs, local TTS).
+Not built yet (see [docs/ROADMAP.md](docs/ROADMAP.md)): screen vision, desktop/app control, games, streaming, desktop (Tauri) and mobile packaging.
 
 ## Run it
 
@@ -31,10 +31,27 @@ npm test         # unit/integration tests (core + server)
 npm run typecheck
 ```
 
-## Known limitations of the MVP
-- Voice uses the browser's Web Speech API: Chrome/Edge only for recognition, and in Chrome the audio is processed by Google's cloud service. For privacy/quality it should move to server-side Whisper + a TTS engine (phase 2).
-- Without headphones the mic can hear her own voice, so barge-in is disabled in that mode.
-- The Anthropic and Ollama providers are implemented against their documented streaming APIs but were **not** exercised against the live services in development (no key/model available); only the mock brain, the WebSocket pipeline and the UI were run end to end.
-- Browser microphone/TTS behaviour was not tested in a real audio environment.
+## Getting a natural voice and Whisper STT
+
+The voice is only as natural as the TTS engine you plug in; the browser's built-in voices sound robotic. Configure in `.env`:
+- `TTS_PROVIDER=openai` with `TTS_BASE_URL`/`TTS_MODEL`/`TTS_VOICE`: any server implementing the OpenAI-style `/audio/speech` endpoint. Several local projects advertise this API; check their docs to confirm compatibility with the version you install.
+- `TTS_PROVIDER=command` with `TTS_COMMAND`: run a local engine such as Piper (flags depend on its version, see its docs).
+- `STT_PROVIDER=openai`: any Whisper server implementing `/audio/transcriptions` (OpenAI or a local one).
+
+Set `soul.voice.ttsVoice` in your soul file for a per-character voice id.
+
+## Run the avatar
+```bash
+npm run avatar:sample   # downloads pixiv's sample VRM (check its embedded license) into apps/web/public/avatars/
+```
+
+## What was and was not verified
+Verified (automated tests + headless Chromium run): protocol, sentence/emotion chunking, VAD, WAV encoding, echo filter, ordered audio delivery and TTS-failure fallback, the OpenAI-style TTS/STT request formats against **simulated** servers, the command-based TTS, Origin/token checks, VRM rendering with expressions, and the full voice loop (fake microphone → VAD → `/stt` → LLM → `/audio/speech` → playback → avatar speaking, and instant stop).
+
+**Not verified** (no access to these in the development sandbox):
+- Real Whisper/TTS engines and real OpenAI/Anthropic/Ollama endpoints: the request formats follow their documented APIs but were only tested against fakes. Voice naturalness could not be listened to.
+- Real microphone + speakers: echo cancellation quality and barge-in without headphones depend on your hardware and browser; tune the VAD boost in `App.tsx` if she interrupts herself or ignores you.
+- The VAD is energy-based (adaptive threshold), not a neural VAD: it can misfire in very noisy rooms.
+- Rendering used software WebGL; performance on real GPUs/phones was not measured. The VRM bundle is ~190 KB gzipped plus the model (the sample is ~11 MB).
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design and security principles.
