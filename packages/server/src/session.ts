@@ -1,7 +1,8 @@
-import { SentenceChunker, type ClientMessage, type ServerMessage } from "@waifu/core";
+import { SentenceChunker, prepareForSpeech, type Capabilities, type ClientMessage, type Emotion, type ServerMessage } from "@waifu/core";
 import type { ChatMessage, LLMProvider } from "./llm/index.js";
 import { extractFacts, type MemoryStore } from "./memory.js";
 import { buildSystemPrompt, type Soul } from "./soul.js";
+import type { TTSProvider } from "./tts/index.js";
 
 const MAX_HISTORY = 24; // messages kept in the short-term context window
 const MAX_INPUT_CHARS = 4000;
@@ -17,10 +18,12 @@ export class Session {
     private llm: LLMProvider,
     private memory: MemoryStore,
     private send: (m: ServerMessage) => void,
+    private tts?: TTSProvider,
+    private caps: Capabilities = { tts: !!tts, stt: false },
   ) {}
 
   hello() {
-    this.send({ type: "ready", soul: { name: this.soul.name, voice: this.soul.voice } });
+    this.send({ type: "ready", soul: { name: this.soul.name, voice: this.soul.voice }, caps: this.caps });
   }
 
   handle(msg: ClientMessage) {
@@ -47,10 +50,35 @@ export class Session {
     const chunker = new SentenceChunker();
     let reply = "";
 
-    const emit = (parts: { text: string; emotion: import("@waifu/core").Emotion }[]) => {
+    // Sentences are synthesized in parallel but delivered strictly in order.
+    let chain: Promise<void> = Promise.resolve();
+    let seq = 0;
+    const deliver = (text: string, emotion: Emotion) => {
+      const spoken = prepareForSpeech(text);
+      if (!this.tts || !spoken) {
+        this.send({ type: "sentence", turnId, text, emotion });
+        return;
+      }
+      const mySeq = seq++;
+      const synth = this.tts.synthesize(spoken, { voice: this.soul.voice.ttsVoice, lang: this.soul.voice.lang }, abort.signal);
+      synth.catch(() => {}); // handled in the chain below
+      chain = chain.then(async () => {
+        try {
+          const { audio, mime } = await synth;
+          if (!abort.signal.aborted) this.send({ type: "audio", turnId, seq: mySeq, text, emotion, mime, data: audio.toString("base64") });
+        } catch (err) {
+          if (abort.signal.aborted) return;
+          // Degrade gracefully: the client speaks this sentence with its own voice.
+          this.send({ type: "error", message: `TTS fallo: ${err instanceof Error ? err.message : err}` });
+          this.send({ type: "sentence", turnId, text, emotion });
+        }
+      });
+    };
+
+    const emit = (parts: { text: string; emotion: Emotion }[]) => {
       for (const p of parts) {
         reply += (reply ? " " : "") + p.text;
-        this.send({ type: "sentence", turnId, text: p.text, emotion: p.emotion });
+        deliver(p.text, p.emotion);
       }
     };
 
@@ -73,6 +101,7 @@ export class Session {
       }
     }
 
+    await chain;
     const interrupted = abort.signal.aborted;
     if (reply) this.history.push({ role: "assistant", content: reply });
     else this.history.pop(); // nothing was said; drop the dangling user message
