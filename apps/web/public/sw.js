@@ -1,6 +1,6 @@
 // Minimal service worker: makes the app installable and the UI shell load offline.
 // It never caches API traffic, audio, screenshots or the (personal, token-protected) avatar model.
-const CACHE = "waifu-shell-v1";
+const CACHE = "waifu-shell-v2"; // bump when icons or the shell change so installed apps refresh
 const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
