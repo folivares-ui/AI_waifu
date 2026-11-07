@@ -1,0 +1,14 @@
+{
+  "name": "ai-waifu",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Soul container: a self-hosted AI companion with real-time voice chat",
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "dev:server": "npm run dev -w @waifu/server",
+    "dev:web": "npm run dev -w @waifu/web",
+    "build": "npm run build -w @waifu/core && npm run build -w @waifu/server && npm run build -w @waifu/web",
+    "test": "npm run test -w @waifu/core && npm run test -w @waifu/server",
+    "typecheck": "npm run build -w @waifu/core && npm run typecheck -w @waifu/server && npm run typecheck -w @waifu/web"
+  }
+}
