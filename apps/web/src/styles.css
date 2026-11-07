@@ -28,3 +28,7 @@ label { font-size: .85rem; }
 .sharing { display: flex; align-items: center; gap: 8px; margin: 0; font-size: .8rem; color: #ffb3b3; }
 .rec { width: 10px; height: 10px; border-radius: 50%; background: #ff3b3b; animation: pulse 1.4s infinite; flex: none; }
 @keyframes pulse { 50% { opacity: .3; } }
+body.capture { background: transparent; }
+body.capture main { max-width: none; padding: 0; }
+body.capture header, body.capture .log, body.capture .controls, body.capture form, body.capture .load-vrm, body.capture .err, body.capture .sharing { display: none; }
+body.capture .vrm { width: 1024px; height: 1024px; max-height: none; border-radius: 0; background: none; }

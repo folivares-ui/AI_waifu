@@ -24,6 +24,10 @@ const POSES: Record<Emotion, { expr: Record<string, number>; look: [number, numb
 };
 const EXPR_NAMES = ["happy", "sad", "angry", "surprised", "relaxed", "aa", "oh", "ih", "blink"];
 
+/** `?capture=face` renders a transparent face close-up (used by scripts/make-icons.mjs to build app icons). */
+const CAPTURE_FACE = new URLSearchParams(location.search).get("capture") === "face";
+if (CAPTURE_FACE) document.body.classList.add("capture");
+
 export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer }) {
   const host = useRef<HTMLDivElement>(null);
   const live = useRef(props);
@@ -86,8 +90,13 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         v.scene.updateMatrixWorld(true);
         const head = bone("head")!.getWorldPosition(new THREE.Vector3());
         // The head bone sits at the base of the skull: frame from above the hair down to the chest.
-        camera.position.set(0, head.y - 0.05, 1.6);
-        camera.lookAt(0, head.y - 0.07, 0);
+        if (CAPTURE_FACE) {
+          camera.position.set(0, head.y + 0.045, 1.15);
+          camera.lookAt(0, head.y + 0.045, 0);
+        } else {
+          camera.position.set(0, head.y - 0.05, 1.6);
+          camera.lookAt(0, head.y - 0.07, 0);
+        }
         gaze.position.set(0, head.y + 0.08, 1.6);
         if (v.lookAt) v.lookAt.target = gaze;
       })
@@ -116,7 +125,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         target.ih = open * shape * 0.25;
       }
       // Blinking
-      if (blinkT < 0 && t > nextBlink) blinkT = 0;
+      if (!CAPTURE_FACE && blinkT < 0 && t > nextBlink) blinkT = 0; // icons: never capture mid-blink
       if (blinkT >= 0) {
         blinkT += dt;
         target.blink = Math.sin(Math.min(1, blinkT / 0.16) * Math.PI);

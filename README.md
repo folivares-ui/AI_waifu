@@ -96,6 +96,14 @@ npm run tts:test -w @waifu/server -- "Hola, soy tu companera"
 
 Set `soul.voice.ttsVoice` in your soul file for a per-character voice id.
 
+## Icons from your character
+The app icons (PWA, desktop) are the face of the current avatar. After changing the model, regenerate them (needs Playwright + Chromium; the web app must be running):
+```bash
+npm run dev:web &                       # then, in another terminal:
+node scripts/make-icons.mjs             # writes apps/web/public/icons/*
+cd apps/desktop && npx tauri icon ../web/public/icons/icon-1024.png
+```
+
 ## Choose your avatar
 ```bash
 npm run avatar:sample -- --list                  # available sample models
