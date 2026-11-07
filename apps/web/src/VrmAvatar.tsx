@@ -15,10 +15,10 @@ export interface AvatarProps {
 /** Expression weights (VRM preset names) and gaze/head offsets per emotion. */
 const POSES: Record<Emotion, { expr: Record<string, number>; look: [number, number]; tilt: number }> = {
   neutral: { expr: {}, look: [0, 0], tilt: 0 },
-  happy: { expr: { happy: 0.85 }, look: [0, 0.03], tilt: 0.04 },
-  sad: { expr: { sad: 0.8 }, look: [0, -0.15], tilt: -0.03 },
-  angry: { expr: { angry: 0.7 }, look: [0, 0], tilt: 0 },
-  surprised: { expr: { surprised: 0.9 }, look: [0, 0.05], tilt: 0 },
+  happy: { expr: { happy: 0.9 }, look: [0, 0.03], tilt: 0.04 },
+  sad: { expr: { sad: 1 }, look: [0, -0.15], tilt: -0.03 },
+  angry: { expr: { angry: 1 }, look: [0, 0], tilt: 0 },
+  surprised: { expr: { surprised: 1 }, look: [0, 0.05], tilt: 0 },
   thinking: { expr: { relaxed: 0.4 }, look: [0.25, 0.25], tilt: 0.09 },
   shy: { expr: { relaxed: 0.7 }, look: [-0.15, -0.2], tilt: 0.1 },
 };
@@ -77,10 +77,12 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         // Relaxed pose instead of the default T-pose.
         const bone = (n: string) => v.humanoid.getNormalizedBoneNode(n as never);
         const set = (n: string, x: number, y: number, z: number) => bone(n)?.rotation.set(x, y, z);
-        set("leftUpperArm", 0, 0, -1.2);
-        set("rightUpperArm", 0, 0, 1.2);
-        set("leftLowerArm", 0, 0, -0.1);
-        set("rightLowerArm", 0, 0, 0.1);
+        // VRM 0.x normalized bones are mirrored relative to VRM 1.0 (after rotateVRM0), so flip the sign.
+        const k = v.meta.metaVersion === "0" ? -1 : 1;
+        set("leftUpperArm", 0, 0, -1.2 * k);
+        set("rightUpperArm", 0, 0, 1.2 * k);
+        set("leftLowerArm", 0, 0, -0.1 * k);
+        set("rightLowerArm", 0, 0, 0.1 * k);
         v.scene.updateMatrixWorld(true);
         const head = bone("head")!.getWorldPosition(new THREE.Vector3());
         // The head bone sits at the base of the skull: frame from above the hair down to the chest.
@@ -107,7 +109,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
       if (p.speaking) {
         const raw = p.getLevel?.() ?? -1; // negative = no audio signal (browser voice): simulate flapping
         const lvl = raw >= 0 ? raw : 0.35 + 0.35 * Math.sin(t * 13) * Math.sin(t * 5.3);
-        const open = Math.min(1, lvl * 2.2);
+        const open = Math.min(0.8, lvl * 2.2); // leave room for the emotion to stay visible
         const shape = (Math.sin(t * 6.1) + 1) / 2; // vary vowels a little
         target.aa = open * (0.55 + 0.45 * shape);
         target.oh = open * (1 - shape) * 0.5;

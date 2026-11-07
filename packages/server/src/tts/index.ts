@@ -39,6 +39,37 @@ export class OpenAICompatibleTTS implements TTSProvider {
   }
 }
 
+/**
+ * ElevenLabs text-to-speech: POST {base}/v1/text-to-speech/{voice_id}?output_format=... with an `xi-api-key` header.
+ * Written from my recollection of their public API; I could not reach their docs from the dev sandbox, so run
+ * `npm run tts:test -w @waifu/server` with your key and check their current docs if anything is rejected.
+ * The voice id comes from your ElevenLabs voice library (TTS_VOICE or soul.voice.ttsVoice).
+ */
+export class ElevenLabsTTS implements TTSProvider {
+  readonly name = "elevenlabs";
+  constructor(
+    private o: { apiKey: string; model: string; voice?: string; baseUrl: string; outputFormat: string; stability?: number; similarity?: number },
+  ) {}
+
+  async synthesize(text: string, opts: TTSOptions, signal?: AbortSignal): Promise<TTSResult> {
+    const voice = opts.voice ?? this.o.voice;
+    if (!voice) throw new Error("ElevenLabs needs a voice id: set TTS_VOICE or soul.voice.ttsVoice");
+    const url = `${this.o.baseUrl.replace(/\/$/, "")}/v1/text-to-speech/${encodeURIComponent(voice)}?output_format=${encodeURIComponent(this.o.outputFormat)}`;
+    const res = await fetch(url, {
+      method: "POST",
+      signal,
+      headers: { "content-type": "application/json", "xi-api-key": this.o.apiKey },
+      body: JSON.stringify({
+        text,
+        model_id: this.o.model,
+        voice_settings: { stability: this.o.stability ?? 0.5, similarity_boost: this.o.similarity ?? 0.75 },
+      }),
+    });
+    if (!res.ok) throw new Error(`ElevenLabs ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    return { audio: Buffer.from(await res.arrayBuffer()), mime: "audio/mpeg" };
+  }
+}
+
 /** Splits a command line into argv, honoring simple "double quotes". */
 export function splitCommand(cmd: string): string[] {
   return [...cmd.matchAll(/"([^"]*)"|(\S+)/g)].map((m) => m[1] ?? m[2]);
@@ -88,10 +119,19 @@ export function createTTS(env: NodeJS.ProcessEnv = process.env): TTSProvider | u
         voice: env.TTS_VOICE ?? "alloy",
         format: (env.TTS_FORMAT as "mp3") ?? "mp3",
       });
+    case "elevenlabs":
+      if (!env.TTS_API_KEY) throw new Error("TTS_PROVIDER=elevenlabs requires TTS_API_KEY");
+      return new ElevenLabsTTS({
+        apiKey: env.TTS_API_KEY,
+        model: env.TTS_MODEL ?? "eleven_multilingual_v2",
+        voice: env.TTS_VOICE,
+        baseUrl: env.TTS_BASE_URL ?? "https://api.elevenlabs.io",
+        outputFormat: env.TTS_FORMAT ?? "mp3_44100_128",
+      });
     case "command":
       if (!env.TTS_COMMAND) throw new Error("TTS_PROVIDER=command requires TTS_COMMAND");
       return new CommandTTS(env.TTS_COMMAND);
     default:
-      throw new Error(`Unknown TTS_PROVIDER "${kind}" (use none | openai | command)`);
+      throw new Error(`Unknown TTS_PROVIDER "${kind}" (use none | openai | elevenlabs | command)`);
   }
 }

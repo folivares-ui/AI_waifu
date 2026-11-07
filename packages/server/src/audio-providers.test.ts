@@ -10,7 +10,7 @@ import { MemoryStore } from "./memory.js";
 import { Session } from "./session.js";
 import type { Soul } from "./soul.js";
 import { OpenAICompatibleSTT } from "./stt/index.js";
-import { CommandTTS, OpenAICompatibleTTS, splitCommand, type TTSProvider } from "./tts/index.js";
+import { CommandTTS, ElevenLabsTTS, OpenAICompatibleTTS, splitCommand, type TTSProvider } from "./tts/index.js";
 
 const servers: Server[] = [];
 const listen = (h: Parameters<typeof createServer>[1]) =>
@@ -40,6 +40,28 @@ describe("OpenAICompatibleTTS", () => {
   it("throws on HTTP errors", async () => {
     const base = await listen((_q, r) => r.writeHead(500).end("boom"));
     await expect(new OpenAICompatibleTTS({ baseUrl: base, model: "m", voice: "v", format: "mp3" }).synthesize("x", {})).rejects.toThrow(/500/);
+  });
+});
+
+describe("ElevenLabsTTS", () => {
+  it("posts to /v1/text-to-speech/{voice} with xi-api-key and returns mpeg", async () => {
+    let seen: any;
+    const base = await listen(async (req, res) => {
+      let b = "";
+      for await (const c of req) b += c;
+      seen = { url: req.url, key: req.headers["xi-api-key"], body: JSON.parse(b) };
+      res.writeHead(200, { "content-type": "audio/mpeg" }).end(Buffer.from([9, 9]));
+    });
+    const tts = new ElevenLabsTTS({ apiKey: "KEY", model: "m1", voice: "vA", baseUrl: base, outputFormat: "mp3_44100_128" });
+    const out = await tts.synthesize("hola", { voice: "vB" });
+    expect(seen.url).toBe("/v1/text-to-speech/vB?output_format=mp3_44100_128");
+    expect(seen.key).toBe("KEY");
+    expect(seen.body).toMatchObject({ text: "hola", model_id: "m1" });
+    expect(out.mime).toBe("audio/mpeg");
+  });
+  it("requires a voice id", async () => {
+    const tts = new ElevenLabsTTS({ apiKey: "k", model: "m", baseUrl: "http://127.0.0.1:1", outputFormat: "x" });
+    await expect(tts.synthesize("x", {})).rejects.toThrow(/voice id/);
   });
 });
 

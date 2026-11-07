@@ -7,3 +7,4 @@ data/*.jsonl
 .DS_Store
 
 apps/web/public/avatars/*.vrm
+data/tts-test.*

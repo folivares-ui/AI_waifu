@@ -34,16 +34,24 @@ npm run typecheck
 ## Getting a natural voice and Whisper STT
 
 The voice is only as natural as the TTS engine you plug in; the browser's built-in voices sound robotic. Configure in `.env`:
+- `TTS_PROVIDER=elevenlabs` with `TTS_API_KEY` and `TTS_VOICE=<voice id>`: cloud voices.
 - `TTS_PROVIDER=openai` with `TTS_BASE_URL`/`TTS_MODEL`/`TTS_VOICE`: any server implementing the OpenAI-style `/audio/speech` endpoint. Several local projects advertise this API; check their docs to confirm compatibility with the version you install.
 - `TTS_PROVIDER=command` with `TTS_COMMAND`: run a local engine such as Piper (flags depend on its version, see its docs).
 - `STT_PROVIDER=openai`: any Whisper server implementing `/audio/transcriptions` (OpenAI or a local one).
 
+After setting your key, check it (writes `data/tts-test.mp3` so you can listen):
+```bash
+npm run tts:test -w @waifu/server -- "Hola, soy tu companera"
+```
+
 Set `soul.voice.ttsVoice` in your soul file for a per-character voice id.
 
-## Run the avatar
+## Choose your avatar
 ```bash
-npm run avatar:sample   # downloads pixiv's sample VRM (check its embedded license) into apps/web/public/avatars/
+npm run avatar:sample -- --list                  # available sample models
+npm run avatar:sample -- --model victoria-rubin  # default; also: vita, vivi, sendagaya-shino, hair-sample-female, seed-san, twist
 ```
+Models are downloaded to `apps/web/public/avatars/default.vrm` (git-ignored, 11-16 MB each). The VRoid beta samples declare CC0 in their embedded metadata; `seed-san` requires credit to VirtualCast, Inc. Re-check the license embedded in whatever model you finally use. For a unique character, create one in VRoid Studio (or buy/commission one) and copy the `.vrm` there, or load it with the "Cargar modelo VRM" button. Both VRM 0.x and 1.0 are supported.
 
 ## What was and was not verified
 Verified (automated tests + headless Chromium run): protocol, sentence/emotion chunking, VAD, WAV encoding, echo filter, ordered audio delivery and TTS-failure fallback, the OpenAI-style TTS/STT request formats against **simulated** servers, the command-based TTS, Origin/token checks, VRM rendering with expressions, and the full voice loop (fake microphone → VAD → `/stt` → LLM → `/audio/speech` → playback → avatar speaking, and instant stop).
