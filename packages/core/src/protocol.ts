@@ -20,6 +20,8 @@ export type ServerMessage =
   | { type: "sentence"; turnId: number; text: string; emotion: Emotion }
   /** Synthesized speech for one sentence, in order. `data` is base64. Emotion applies while it plays. */
   | { type: "audio"; turnId: number; seq: number; text: string; emotion: Emotion; mime: string; data: string }
+  /** The soul is running a tool (e.g. querying a public API). For UI feedback only. */
+  | { type: "tool"; turnId: number; name: string; status: "start" | "end"; ok?: boolean }
   | { type: "done"; turnId: number; interrupted: boolean }
   | { type: "error"; message: string };
 

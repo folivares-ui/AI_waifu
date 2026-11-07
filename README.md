@@ -31,6 +31,18 @@ npm test         # unit/integration tests (core + server)
 npm run typecheck
 ```
 
+## Public APIs (tools)
+
+`public-apis` is a *list* (README) of ~2,200 third-party APIs, not an API itself, so "connecting" to it means giving the soul three tools: `search_apis` (find an API by topic), `read_api_docs` (read its documentation page) and `call_api` (read-only HTTP GET). She searches, reads the docs, builds the request and answers you.
+
+```bash
+npm run apis:update -w @waifu/server          # downloads and parses the catalog into data/public-apis.json
+TOOLS=public_apis LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=... npm run dev:server
+```
+About half the catalog needs no key. For the rest, put keys in `data/api-keys.json` (see `.env.example`); keys stay on the server and are never shown to the model.
+
+Safety design (all covered by tests): off unless `TOOLS` is set; GET only, https only; the server refuses private/loopback/link-local addresses (checked at connect time, so DNS tricks and redirects cannot bypass it); the model can only call hosts from the catalog or named in documentation it read, which blocks a prompt-injected "send her memories to attacker.com"; responses are size/time limited and wrapped as untrusted data; max 4 tool rounds / 8 calls per turn. APIs are third parties: check each one's terms and rate limits.
+
 ## Getting a natural voice and Whisper STT
 
 The voice is only as natural as the TTS engine you plug in; the browser's built-in voices sound robotic. Configure in `.env`:
@@ -57,6 +69,7 @@ Models are downloaded to `apps/web/public/avatars/default.vrm` (git-ignored, 11-
 Verified (automated tests + headless Chromium run): protocol, sentence/emotion chunking, VAD, WAV encoding, echo filter, ordered audio delivery and TTS-failure fallback, the OpenAI-style TTS/STT request formats against **simulated** servers, the command-based TTS, Origin/token checks, VRM rendering with expressions, and the full voice loop (fake microphone → VAD → `/stt` → LLM → `/audio/speech` → playback → avatar speaking, and instant stop).
 
 **Not verified** (no access to these in the development sandbox):
+- Any real public API call: the sandbox blocks those hosts. The catalog parsing (2,230 real entries), search, SSRF guards, redirect handling and the model tool loop are tested against local fake servers; whether a given API works depends on its docs, key and uptime. Anthropic's tool-use streaming is implemented from my recollection of its API and was only exercised with a scripted model.
 - Real Whisper/TTS engines and real OpenAI/Anthropic/Ollama endpoints: the request formats follow their documented APIs but were only tested against fakes. Voice naturalness could not be listened to.
 - Real microphone + speakers: echo cancellation quality and barge-in without headphones depend on your hardware and browser; tune the VAD boost in `App.tsx` if she interrupts herself or ignores you.
 - The VAD is energy-based (adaptive threshold), not a neural VAD: it can misfire in very noisy rooms.

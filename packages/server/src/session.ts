@@ -1,11 +1,14 @@
 import { SentenceChunker, prepareForSpeech, type Capabilities, type ClientMessage, type Emotion, type ServerMessage } from "@waifu/core";
-import type { ChatMessage, LLMProvider } from "./llm/index.js";
+import type { ChatMessage, ContentBlock, LLMEvent, LLMProvider } from "./llm/index.js";
+import type { Tool } from "./tools/index.js";
 import { extractFacts, type MemoryStore } from "./memory.js";
 import { buildSystemPrompt, type Soul } from "./soul.js";
 import type { TTSProvider } from "./tts/index.js";
 
 const MAX_HISTORY = 24; // messages kept in the short-term context window
 const MAX_INPUT_CHARS = 4000;
+const MAX_TOOL_ROUNDS = 4; // tool round-trips per user turn
+const MAX_TOOL_CALLS = 8;
 
 /** One connected client = one conversation with the soul. */
 export class Session {
@@ -20,6 +23,7 @@ export class Session {
     private send: (m: ServerMessage) => void,
     private tts?: TTSProvider,
     private caps: Capabilities = { tts: !!tts, stt: false },
+    private tools: Tool[] = [],
   ) {}
 
   hello() {
@@ -84,15 +88,62 @@ export class Session {
 
     this.history.push({ role: "user", content: userText });
     try {
-      const system = buildSystemPrompt(this.soul, this.memory.recall(userText));
-      for await (const token of this.llm.stream({
-        system,
-        messages: this.history.slice(-MAX_HISTORY),
-        signal: abort.signal,
-      })) {
+      const system = buildSystemPrompt(this.soul, this.memory.recall(userText), this.tools.length > 0);
+      const working: ChatMessage[] = this.history.slice(-MAX_HISTORY);
+      const toolDefs = this.tools.map((t) => t.def);
+      let rounds = 0;
+      let calls = 0;
+      for (let iter = 0; iter < MAX_TOOL_ROUNDS + 2; iter++) {
+        const events: AsyncIterable<LLMEvent> =
+          toolDefs.length && this.llm.streamWithTools
+            ? this.llm.streamWithTools({ system, messages: working, tools: toolDefs, signal: abort.signal })
+            : (async function* (s: AsyncIterable<string>) {
+                for await (const text of s) yield { type: "text", text } as LLMEvent;
+              })(this.llm.stream({ system, messages: working, signal: abort.signal }));
+        const uses: Extract<LLMEvent, { type: "tool_use" }>[] = [];
+        let stepText = "";
+        for await (const ev of events) {
+          if (abort.signal.aborted) break;
+          if (ev.type === "text") {
+            stepText += ev.text;
+            this.send({ type: "token", turnId, text: ev.text });
+            emit(chunker.push(ev.text));
+          } else uses.push(ev);
+        }
+        if (abort.signal.aborted || uses.length === 0) break;
+
+        emit(chunker.flush()); // let her say "let me look that up" while the tool runs
+        const results: ContentBlock[] = [];
+        for (const u of uses) {
+          const tool = this.tools.find((t) => t.def.name === u.name);
+          let content: string;
+          let ok = true;
+          if (!tool) {
+            content = `Unknown tool "${u.name}".`;
+            ok = false;
+          } else if (rounds >= MAX_TOOL_ROUNDS || calls >= MAX_TOOL_CALLS) {
+            content = "Tool limit reached for this turn. Answer the user with what you already know.";
+            ok = false;
+          } else {
+            calls++;
+            this.send({ type: "tool", turnId, name: u.name, status: "start" });
+            try {
+              content = await tool.run(u.input, abort.signal);
+            } catch (e) {
+              content = `Error: ${e instanceof Error ? e.message : String(e)}`;
+              ok = false;
+            }
+            this.send({ type: "tool", turnId, name: u.name, status: "end", ok });
+          }
+          results.push({ type: "tool_result", tool_use_id: u.id, content, ...(ok ? {} : { is_error: true }) });
+        }
+        rounds++;
+        working.push({
+          role: "assistant",
+          content: [...(stepText ? [{ type: "text" as const, text: stepText }] : []), ...uses.map((u) => ({ type: "tool_use" as const, id: u.id, name: u.name, input: u.input }))],
+        });
+        working.push({ role: "user", content: results });
         if (abort.signal.aborted) break;
-        this.send({ type: "token", turnId, text: token });
-        emit(chunker.push(token));
       }
       if (!abort.signal.aborted) emit(chunker.flush());
     } catch (err) {

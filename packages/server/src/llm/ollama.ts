@@ -1,4 +1,4 @@
-import { readLines, type LLMProvider, type LLMRequest } from "./types.js";
+import { asText, readLines, type LLMProvider, type LLMRequest } from "./types.js";
 
 /** Local models through Ollama (default http://localhost:11434). Fully offline. */
 export class OllamaProvider implements LLMProvider {
@@ -13,7 +13,7 @@ export class OllamaProvider implements LLMProvider {
       body: JSON.stringify({
         model: this.model,
         stream: true,
-        messages: [{ role: "system", content: req.system }, ...req.messages],
+        messages: [{ role: "system", content: req.system }, ...req.messages.map((m) => ({ role: m.role, content: asText(m.content) }))],
       }),
     });
     if (!res.ok || !res.body) throw new Error(`Ollama ${res.status}: ${await res.text()}`);

@@ -1,6 +1,24 @@
+export type ContentBlock =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: unknown }
+  | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean };
+
 export interface ChatMessage {
   role: "user" | "assistant";
-  content: string;
+  content: string | ContentBlock[];
+}
+
+export interface ToolDef {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+
+export type LLMEvent = { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: unknown };
+
+/** Flattens message content to plain text (for providers without tool support). */
+export function asText(c: string | ContentBlock[]): string {
+  return typeof c === "string" ? c : c.map((b) => (b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "")).join("\n");
 }
 
 export interface LLMRequest {
@@ -14,6 +32,8 @@ export interface LLMRequest {
 export interface LLMProvider {
   readonly name: string;
   stream(req: LLMRequest): AsyncIterable<string>;
+  /** Optional native tool use. Providers without it simply never get tools. */
+  streamWithTools?(req: LLMRequest & { tools: ToolDef[] }): AsyncIterable<LLMEvent>;
 }
 
 export async function complete(llm: LLMProvider, req: LLMRequest): Promise<string> {

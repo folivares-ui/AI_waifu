@@ -7,6 +7,7 @@ import { createLLM } from "./llm/index.js";
 import { MemoryStore } from "./memory.js";
 import { Session } from "./session.js";
 import { loadSoul } from "./soul.js";
+import { createToolFactory } from "./tools/index.js";
 import { createSTT } from "./stt/index.js";
 import { createTTS } from "./tts/index.js";
 
@@ -28,6 +29,7 @@ const soul = loadSoul(process.env.SOUL_FILE ?? resolve(root, "souls/default.soul
 const llm = createLLM();
 const tts = createTTS();
 const stt = createSTT();
+const makeTools = createToolFactory();
 const caps: Capabilities = { tts: !!tts, stt: !!stt };
 const memory = new MemoryStore(process.env.MEMORY_FILE ?? resolve(root, "data/memory.json"));
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
@@ -90,7 +92,7 @@ const http = createServer(async (req, res) => {
 
 const wss = new WebSocketServer({ server: http, path: "/ws", maxPayload: 64 * 1024, verifyClient: ({ req }: { req: IncomingMessage }) => authorized(req) });
 wss.on("connection", (ws) => {
-  const session = new Session(soul, llm, memory, (m) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m)), tts, caps);
+  const session = new Session(soul, llm, memory, (m) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m)), tts, caps, makeTools?.());
   session.hello();
   ws.on("message", (data) => {
     try {

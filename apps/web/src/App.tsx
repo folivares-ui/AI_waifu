@@ -176,7 +176,7 @@ export function App() {
             <b>{l.who === "user" ? "Tu" : soul.name}:</b> {l.text}
           </p>
         ))}
-        {status && <p className="status">{status}</p>}
+        {(status || soul.toolStatus) && <p className="status">{soul.toolStatus ?? status}</p>}
       </section>
       {(soul.error || micError) && <p className="err">{micError ?? soul.error}</p>}
       <div className="controls">

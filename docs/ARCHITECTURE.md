@@ -16,6 +16,9 @@
 - `apps/web`: React client. Mic → browser STT → `user_text`; `sentence` events → TTS queue + avatar emotion.
 - The soul (persona, voice hints, memory) lives in plain files in this repo's `souls/` and `data/` (memory is git-ignored). You own it; any provider can be swapped.
 
+## Tools
+`packages/server/src/tools/`: `catalog.ts` (parse/search the public-apis README), `safe-fetch.ts` (SSRF-guarded GET), `public-apis.ts` (the three tools). The session runs a bounded loop: model streams text (spoken immediately) and may request tools; results go back as `tool_result` blocks; only the final spoken text is kept in history. Tool results are wrapped as untrusted data.
+
 ## Security principles (decided now, enforced when tools land)
 1. Server binds to loopback; exposing it requires `AUTH_TOKEN` (the server refuses to start otherwise).
 2. Every capability that touches your machine (screen capture, keyboard/mouse, app control, browser) is a **tool** that is **off by default**, individually enabled, and logged.

@@ -25,6 +25,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
   const [caps, setCaps] = useState<Capabilities>({ tts: false, stt: false });
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [error, setError] = useState<string>();
+  const [toolStatus, setToolStatus] = useState<string>();
   const nextId = useRef(1);
   const currentTurn = useRef(0);
   // Server turn ids are sequential per connection (n-th user_text = turn n). Anything at or below
@@ -68,7 +69,10 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
           if (m.turnId > ignoreUpTo.current) h.current.onSentence(m.text, m.emotion);
         } else if (m.type === "audio") {
           if (m.turnId > ignoreUpTo.current) h.current.onAudio({ data: b64ToBuffer(m.data), emotion: m.emotion, text: m.text });
+        } else if (m.type === "tool") {
+          setToolStatus(m.status === "start" ? `Consultando ${m.name === "search_apis" ? "el catalogo de APIs" : m.name === "read_api_docs" ? "la documentacion" : "una API"}...` : undefined);
         } else if (m.type === "done") {
+          setToolStatus(undefined);
           if (m.interrupted) h.current.onInterruptedDone();
         } else if (m.type === "error") {
           setError(m.message);
@@ -97,7 +101,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
     [send],
   );
 
-  return { connected, name, voice, caps, lines, error, sendText, interrupt: () => {
+  return { connected, name, voice, caps, toolStatus, lines, error, sendText, interrupt: () => {
       ignoreUpTo.current = sent.current;
       send({ type: "interrupt" });
     },

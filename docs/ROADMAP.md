@@ -14,6 +14,9 @@ Voice chat, avatar, soul file, memory, swappable LLM.
 - [ ] Memory v2: embeddings, summarisation of old conversations, forgetting/editing UI.
 - [ ] Persist a user-loaded VRM across reloads (currently only `public/avatars/default.vrm` persists).
 
+## Phase 2.5 — Public APIs (DONE, see README)
+- [x] Catalog + read-only tools with SSRF/injection protections. [ ] Tool support for Ollama. [ ] Per-API usage hints/curated adapters for the most useful ones. [ ] Confirmation step before APIs that would need writes (none today: GET only).
+
 ## Phase 3 — Desktop app + remote access
 - Tauri shell (Windows/macOS) around the web client; global hotkey / push-to-talk; tray; runs the server as a sidecar (?).
 - Phone/tablet: installable PWA against the same server (secured with token + HTTPS), optional native wrapper later.
