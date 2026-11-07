@@ -4,6 +4,7 @@ import { AvatarStage } from "./AvatarStage";
 import { startMic, type MicHandle } from "./mic";
 import { transcribe } from "./net";
 import { ClipPlayer } from "./player";
+import { ScreenShare } from "./screen";
 import { useSoul } from "./useSoul";
 import { Listener, Speaker, sttSupported } from "./voice";
 
@@ -17,6 +18,11 @@ export function App() {
   const [status, setStatus] = useState("");
   const [text, setText] = useState("");
   const [micError, setMicError] = useState<string>();
+  const [sharing, setSharing] = useState(false);
+  const [watching, setWatching] = useState(false);
+  const screen = useRef<ScreenShare | undefined>(undefined);
+  const watchRef = useRef(false);
+  watchRef.current = watching;
 
   const speaker = useRef<Speaker | undefined>(undefined);
   const player = useRef<ClipPlayer | undefined>(undefined);
@@ -50,6 +56,12 @@ export function App() {
     },
     onAudio: (clip) => getPlayer().enqueue(clip),
     onInterruptedDone: stopSpeech,
+    // The soul asked to look: answer only if the user is sharing (the capture itself is always the user's choice).
+    onScreenRequest: (id) => {
+      const img = screen.current?.capture();
+      if (img) soul.sendScreenFrame(id, img);
+      else soul.sendScreenFrame(id, undefined, "not_sharing");
+    },
   });
   const { caps, voice } = soul;
 
@@ -159,6 +171,47 @@ export function App() {
     setText("");
   };
 
+  const stopSharing = () => {
+    screen.current?.stop();
+    setSharing(false);
+    setWatching(false);
+  };
+  const toggleShare = async () => {
+    if (sharing) return stopSharing();
+    try {
+      screen.current ??= new ScreenShare();
+      await screen.current.start(() => {
+        setSharing(false);
+        setWatching(false);
+      });
+      setSharing(true);
+    } catch (e) {
+      // NotAllowedError = the user cancelled the picker: not an error worth showing.
+      if (!(e instanceof DOMException && e.name === "NotAllowedError")) setMicError(`No pude compartir la pantalla: ${e instanceof Error ? e.message : e}`);
+    }
+  };
+  const askAboutScreen = () => {
+    const img = screen.current?.capture();
+    if (!img) return setMicError("Primero pulsa 'Compartir pantalla'.");
+    void getPlayer().unlock();
+    stopSpeech();
+    soul.sendText(text.trim() || "Mira mi pantalla. ¿Que ves y como podria mejorarlo?", img);
+    setText("");
+  };
+
+  // Continuous observation: look for changes every few seconds; the server rate-limits what she actually says.
+  useEffect(() => {
+    if (!watching) return;
+    const id = setInterval(() => {
+      const s = screen.current;
+      if (!s?.active || busy() || !s.changed()) return;
+      const img = s.capture(1024, 0.6);
+      if (img) soul.sendWatch(img);
+    }, 5000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watching]);
+
   const canListen = caps.stt || sttSupported;
   return (
     <main>
@@ -178,6 +231,11 @@ export function App() {
         ))}
         {(status || soul.toolStatus) && <p className="status">{soul.toolStatus ?? status}</p>}
       </section>
+      {sharing && (
+        <p className="sharing" role="status">
+          <span className="rec" /> {watching ? "Observando tu pantalla" : "Pantalla compartida"} (nada se guarda; solo se envia al servidor cuando ella mira)
+        </p>
+      )}
       {(soul.error || micError) && <p className="err">{micError ?? soul.error}</p>}
       <div className="controls">
         <button onClick={() => void toggleMic()} disabled={!canListen} className={listening ? "active" : ""}>
@@ -188,6 +246,17 @@ export function App() {
         </label>
         <button onClick={() => { stopSpeech(); soul.interrupt(); }}>Callar</button>
       </div>
+      {soul.caps.vision && ScreenShare.supported && (
+        <div className="controls">
+          <button onClick={() => void toggleShare()} className={sharing ? "active" : ""} title="Elige una VENTANA concreta en vez de toda la pantalla para no mostrar otras apps.">
+            {sharing ? "Dejar de compartir" : "Compartir pantalla"}
+          </button>
+          <button onClick={askAboutScreen} disabled={!sharing}>Preguntar por mi pantalla</button>
+          <label title="Ella comentara de vez en cuando si ve algo util (como mucho una vez cada ~25 s, solo si la pantalla cambio).">
+            <input type="checkbox" checked={watching} disabled={!sharing} onChange={(e) => setWatching(e.target.checked)} /> Observacion continua
+          </label>
+        </div>
+      )}
       {!canListen && <p className="err">Tu navegador no soporta reconocimiento de voz (usa Chrome o Edge) y el servidor no tiene STT. Puedes escribir.</p>}
       <form onSubmit={submit}>
         <input value={text} onChange={(e) => setText(e.target.value)} placeholder="O escribe aqui..." />

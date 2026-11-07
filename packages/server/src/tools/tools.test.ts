@@ -165,7 +165,7 @@ describe("Session tool loop", () => {
     const out: ServerMessage[] = [];
     const llm = new ToolLLM();
     const tool = { def: { name: "call_api", description: "d", input_schema: {} }, run: async () => "Cats purr" };
-    new Session(soul, llm, mem(), (m) => out.push(m), undefined, undefined, [tool]).handle({ type: "user_text", text: "x" });
+    new Session(soul, llm, mem(), (m) => out.push(m), { tools: [tool] }).handle({ type: "user_text", text: "x" });
     await until(() => out.some((m) => m.type === "done"));
     const kinds = out.map((m) => (m.type === "sentence" ? `s:${m.text}` : m.type === "tool" ? `tool:${m.status}` : m.type)).filter((k) => k !== "token");
     expect(kinds).toEqual(["s:Voy a mirar.", "tool:start", "tool:end", "s:Dato: purr.", "done"]);
@@ -182,7 +182,7 @@ describe("Session tool loop", () => {
       async *streamWithTools(): AsyncGenerator<LLMEvent> { yield { type: "tool_use", id: `i${calls++}`, name: "call_api", input: {} }; }
     }
     const tool = { def: { name: "call_api", description: "d", input_schema: {} }, run: async () => { throw new Error("boom"); } };
-    new Session(soul, new Loop(), mem(), (m) => out.push(m), undefined, undefined, [tool]).handle({ type: "user_text", text: "x" });
+    new Session(soul, new Loop(), mem(), (m) => out.push(m), { tools: [tool] }).handle({ type: "user_text", text: "x" });
     await until(() => out.some((m) => m.type === "done"));
     expect(out.filter((m) => m.type === "tool" && m.status === "end").every((m: any) => m.ok === false)).toBe(true);
     expect(out.filter((m) => m.type === "tool" && m.status === "start").length).toBeLessThanOrEqual(4);

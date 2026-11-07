@@ -3,6 +3,7 @@ import { readLines, type LLMEvent, type LLMProvider, type LLMRequest, type ToolD
 /** Anthropic Messages API (streaming over SSE). Needs ANTHROPIC_API_KEY. */
 export class AnthropicProvider implements LLMProvider {
   readonly name = "anthropic";
+  readonly vision = true;
   constructor(private apiKey: string, private model: string) {}
 
   async *stream(req: LLMRequest): AsyncIterable<string> {

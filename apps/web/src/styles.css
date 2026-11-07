@@ -25,3 +25,6 @@ label { font-size: .85rem; }
 .load-vrm:hover { opacity: 1; }
 .status { color: #9d8cff; font-style: italic; }
 .mode { margin-left: auto; opacity: .5; }
+.sharing { display: flex; align-items: center; gap: 8px; margin: 0; font-size: .8rem; color: #ffb3b3; }
+.rec { width: 10px; height: 10px; border-radius: 50%; background: #ff3b3b; animation: pulse 1.4s infinite; flex: none; }
+@keyframes pulse { 50% { opacity: .3; } }

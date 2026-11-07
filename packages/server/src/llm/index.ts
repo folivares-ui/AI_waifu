@@ -12,7 +12,7 @@ export function createLLM(env: NodeJS.ProcessEnv = process.env): LLMProvider {
       if (!env.ANTHROPIC_API_KEY) throw new Error("LLM_PROVIDER=anthropic requires ANTHROPIC_API_KEY");
       return new AnthropicProvider(env.ANTHROPIC_API_KEY, env.ANTHROPIC_MODEL ?? "claude-sonnet-5-5");
     case "ollama":
-      return new OllamaProvider(env.OLLAMA_MODEL ?? "llama3.1", env.OLLAMA_HOST);
+      return new OllamaProvider(env.OLLAMA_MODEL ?? "llama3.1", env.OLLAMA_HOST, env.OLLAMA_VISION === "1");
     case "mock":
       return new MockProvider();
     default:

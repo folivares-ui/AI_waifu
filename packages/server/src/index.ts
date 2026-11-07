@@ -30,7 +30,7 @@ const llm = createLLM();
 const tts = createTTS();
 const stt = createSTT();
 const makeTools = createToolFactory();
-const caps: Capabilities = { tts: !!tts, stt: !!stt };
+const caps: Capabilities = { tts: !!tts, stt: !!stt, vision: !!llm.vision };
 const memory = new MemoryStore(process.env.MEMORY_FILE ?? resolve(root, "data/memory.json"));
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 
@@ -90,9 +90,9 @@ const http = createServer(async (req, res) => {
   res.writeHead(404).end();
 });
 
-const wss = new WebSocketServer({ server: http, path: "/ws", maxPayload: 64 * 1024, verifyClient: ({ req }: { req: IncomingMessage }) => authorized(req) });
+const wss = new WebSocketServer({ server: http, path: "/ws", maxPayload: 3 * 1024 * 1024 /* screenshots */, verifyClient: ({ req }: { req: IncomingMessage }) => authorized(req) });
 wss.on("connection", (ws) => {
-  const session = new Session(soul, llm, memory, (m) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m)), tts, caps, makeTools?.());
+  const session = new Session(soul, llm, memory, (m) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m)), { tts, caps, tools: makeTools, watchMinIntervalMs: Number(process.env.WATCH_MIN_INTERVAL_MS ?? 25000) });
   session.hello();
   ws.on("message", (data) => {
     try {

@@ -129,7 +129,7 @@ describe("Session with TTS", () => {
       },
     };
     const out: ServerMessage[] = [];
-    const s = new Session(soul, new Scripted("Uno **grande**. Dos 😊. Tres."), mem(), (m) => out.push(m), tts);
+    const s = new Session(soul, new Scripted("Uno **grande**. Dos 😊. Tres."), mem(), (m) => out.push(m), { tts });
     s.handle({ type: "user_text", text: "x" });
     await until(() => doneOf(out));
     const audios = out.filter((m) => m.type === "audio") as Extract<ServerMessage, { type: "audio" }>[];
@@ -142,7 +142,7 @@ describe("Session with TTS", () => {
   it("falls back to a plain sentence (browser voice) when TTS fails", async () => {
     const tts: TTSProvider = { name: "bad", synthesize: async () => { throw new Error("down"); } };
     const out: ServerMessage[] = [];
-    new Session(soul, new Scripted("Hola."), mem(), (m) => out.push(m), tts).handle({ type: "user_text", text: "x" });
+    new Session(soul, new Scripted("Hola."), mem(), (m) => out.push(m), { tts }).handle({ type: "user_text", text: "x" });
     await until(() => doneOf(out));
     expect(out.some((m) => m.type === "error")).toBe(true);
     expect(out.filter((m) => m.type === "sentence")).toHaveLength(1);
@@ -151,7 +151,7 @@ describe("Session with TTS", () => {
 
   it("advertises capabilities in ready", () => {
     const out: ServerMessage[] = [];
-    new Session(soul, new Scripted(""), mem(), (m) => out.push(m), undefined, { tts: false, stt: true }).hello();
-    expect(out[0]).toMatchObject({ type: "ready", caps: { tts: false, stt: true } });
+    new Session(soul, new Scripted(""), mem(), (m) => out.push(m), { caps: { tts: false, stt: true, vision: false } }).hello();
+    expect(out[0]).toMatchObject({ type: "ready", caps: { tts: false, stt: true, vision: false } });
   });
 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Capabilities, ClientMessage, Emotion, ServerMessage, VoiceHints } from "@waifu/core";
+import { PROACTIVE_TURN_BASE, type Capabilities, type ClientMessage, type Emotion, type ScreenImage, type ServerMessage, type VoiceHints } from "@waifu/core";
 import { b64ToBuffer, type Clip } from "./player";
 import { serverBase } from "./net";
 
@@ -15,14 +15,14 @@ function wsUrl(): string {
 }
 
 /** Connection to the soul server. Sentences arrive ready for TTS. */
-export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion) => void; onAudio: (clip: Clip) => void; onInterruptedDone: () => void }) {
+export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion) => void; onAudio: (clip: Clip) => void; onInterruptedDone: () => void; onScreenRequest: (requestId: string) => void }) {
   const ws = useRef<WebSocket | undefined>(undefined);
   const h = useRef(handlers);
   h.current = handlers;
   const [connected, setConnected] = useState(false);
   const [name, setName] = useState("...");
   const [voice, setVoice] = useState<VoiceHints>({ lang: "es-ES", pitch: 1, rate: 1 });
-  const [caps, setCaps] = useState<Capabilities>({ tts: false, stt: false });
+  const [caps, setCaps] = useState<Capabilities>({ tts: false, stt: false, vision: false });
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [error, setError] = useState<string>();
   const [toolStatus, setToolStatus] = useState<string>();
@@ -32,6 +32,16 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
   // `ignoreUpTo` belongs to an answer the user already cut off, so late-arriving audio is dropped.
   const sent = useRef(0);
   const ignoreUpTo = useRef(0);
+  // Soul-initiated (screen observation) turns have their own numbering; same idea.
+  const proactiveSeen = useRef(PROACTIVE_TURN_BASE);
+  const proactiveIgnoreUpTo = useRef(PROACTIVE_TURN_BASE);
+  const dropped = (turnId: number) => {
+    if (turnId >= PROACTIVE_TURN_BASE) {
+      proactiveSeen.current = Math.max(proactiveSeen.current, turnId);
+      return turnId <= proactiveIgnoreUpTo.current;
+    }
+    return turnId <= ignoreUpTo.current;
+  };
 
   useEffect(() => {
     let closed = false;
@@ -42,6 +52,8 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
       sock.onopen = () => {
         sent.current = 0;
         ignoreUpTo.current = 0;
+        proactiveSeen.current = PROACTIVE_TURN_BASE;
+        proactiveIgnoreUpTo.current = PROACTIVE_TURN_BASE;
         setConnected(true);
         setError(undefined);
       };
@@ -66,9 +78,11 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
             return [...ls, { id: nextId.current++, who: "soul", text: m.text.replace(/\[emotion:[^\]]*\]?/gi, "") }];
           });
         } else if (m.type === "sentence") {
-          if (m.turnId > ignoreUpTo.current) h.current.onSentence(m.text, m.emotion);
+          if (!dropped(m.turnId)) h.current.onSentence(m.text, m.emotion);
         } else if (m.type === "audio") {
-          if (m.turnId > ignoreUpTo.current) h.current.onAudio({ data: b64ToBuffer(m.data), emotion: m.emotion, text: m.text });
+          if (!dropped(m.turnId)) h.current.onAudio({ data: b64ToBuffer(m.data), emotion: m.emotion, text: m.text });
+        } else if (m.type === "screen_request") {
+          h.current.onScreenRequest(m.requestId);
         } else if (m.type === "tool") {
           setToolStatus(m.status === "start" ? `Consultando ${m.name === "search_apis" ? "el catalogo de APIs" : m.name === "read_api_docs" ? "la documentacion" : "una API"}...` : undefined);
         } else if (m.type === "done") {
@@ -92,17 +106,31 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
   }, []);
 
   const sendText = useCallback(
-    (text: string) => {
-      setLines((ls) => [...ls, { id: nextId.current++, who: "user", text }]);
+    (text: string, image?: ScreenImage) => {
+      setLines((ls) => [...ls, { id: nextId.current++, who: "user", text: image ? `${text} [con captura de pantalla]` : text }]);
       ignoreUpTo.current = sent.current; // a new utterance replaces whatever was being answered
+      proactiveIgnoreUpTo.current = proactiveSeen.current;
       sent.current++;
-      send({ type: "user_text", text });
+      send({ type: "user_text", text, ...(image ? { image } : {}) });
     },
     [send],
   );
 
-  return { connected, name, voice, caps, toolStatus, lines, error, sendText, interrupt: () => {
+  return {
+    connected,
+    name,
+    voice,
+    caps,
+    toolStatus,
+    lines,
+    error,
+    sendText,
+    sendScreenFrame: (requestId: string, image?: ScreenImage, error?: "not_sharing" | "failed") =>
+      send({ type: "screen_frame", requestId, ...(image ? { image } : {}), ...(error ? { error } : {}) }),
+    sendWatch: (image: ScreenImage) => send({ type: "screen_watch", image }),
+    interrupt: () => {
       ignoreUpTo.current = sent.current;
+      proactiveIgnoreUpTo.current = proactiveSeen.current;
       send({ type: "interrupt" });
     },
   };

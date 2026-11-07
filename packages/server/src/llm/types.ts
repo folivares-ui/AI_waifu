@@ -1,5 +1,6 @@
 export type ContentBlock =
   | { type: "text"; text: string }
+  | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
   | { type: "tool_use"; id: string; name: string; input: unknown }
   | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean };
 
@@ -31,6 +32,8 @@ export interface LLMRequest {
 /** Any brain (cloud or local) implements this. Add new providers in ./index.ts. */
 export interface LLMProvider {
   readonly name: string;
+  /** True if the model accepts image input (screen vision). */
+  readonly vision?: boolean;
   stream(req: LLMRequest): AsyncIterable<string>;
   /** Optional native tool use. Providers without it simply never get tools. */
   streamWithTools?(req: LLMRequest & { tools: ToolDef[] }): AsyncIterable<LLMEvent>;
