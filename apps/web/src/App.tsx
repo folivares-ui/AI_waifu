@@ -141,6 +141,14 @@ export function App() {
     listener.current.start();
   };
 
+  const toggleMicRef = useRef<() => void>(() => {});
+  // Desktop shell: global push-to-talk shortcut (Ctrl+Shift+Space) dispatches this event.
+  useEffect(() => {
+    const h = () => toggleMicRef.current();
+    window.addEventListener("waifu:toggle-mic", h);
+    return () => window.removeEventListener("waifu:toggle-mic", h);
+  }, []);
+
   const toggleMic = async () => {
     if (listening) {
       mic.current?.stop();
@@ -150,6 +158,7 @@ export function App() {
       setStatus("");
       return;
     }
+    if (!caps.stt && !sttSupported) return setMicError("Este navegador no tiene reconocimiento de voz: configura STT_PROVIDER en el servidor.");
     setMicError(undefined);
     void getPlayer().unlock();
     try {
@@ -160,6 +169,8 @@ export function App() {
       setMicError(`No pude abrir el microfono: ${e instanceof Error ? e.message : e}`);
     }
   };
+
+  toggleMicRef.current = () => void toggleMic();
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();

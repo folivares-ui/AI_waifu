@@ -24,9 +24,16 @@ export interface MicHandle {
  * ~20 ms frames to the endpointer, which reports speech start and finished utterances.
  */
 export async function startMic(onEvent: (e: EndpointEvent) => void): Promise<MicHandle> {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-  });
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+    });
+  } catch (e) {
+    // Some system webviews reject advanced constraints: retry with the bare minimum (permission errors still propagate).
+    if (e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "NotFoundError")) throw e;
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  }
   const ctx = new AudioContext();
   const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
   await ctx.audioWorklet.addModule(url);

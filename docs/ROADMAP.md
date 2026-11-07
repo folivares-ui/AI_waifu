@@ -17,12 +17,17 @@ Voice chat, avatar, soul file, memory, swappable LLM.
 ## Phase 2.5 — Public APIs (DONE, see README)
 - [x] Catalog + read-only tools with SSRF/injection protections. [ ] Tool support for Ollama. [ ] Per-API usage hints/curated adapters for the most useful ones. [ ] Confirmation step before APIs that would need writes (none today: GET only).
 
-## Phase 3 — Desktop app + remote access
-- Tauri shell (Windows/macOS) around the web client; global hotkey / push-to-talk; tray; runs the server as a sidecar (?).
-- Phone/tablet: installable PWA against the same server (secured with token + HTTPS), optional native wrapper later.
+## Phase 3 — Desktop app + remote access (DONE, with caveats)
+- [x] Server serves the web app; HTTPS option, token auth, pairing link/QR; installable PWA (manifest, icons, offline shell).
+- [x] Tauri 2 desktop shell: starts/reuses the server, native window, global push-to-talk shortcut, server never orphaned. Compiled and run on Linux (WebKitGTK); Windows/macOS builds not tried.
+- [ ] Standalone installers that bundle Node + the server (today the repo and Node must be present).
+- [ ] Native iOS/Android wrappers (Tauri mobile or Capacitor); today phones use the PWA.
+- [ ] Transparent always-on-top "desktop pet" window mode.
 
-## Phase 4 — Seeing the screen
-- Screen capture tool (user-selected window or monitor, visible indicator when active) → a vision-capable model. Suggestions/"review my work" mode. Opt-in per session.
+## Phase 4 — Seeing the screen (DONE, browser path)
+- [x] Opt-in sharing via getDisplayMedia, visible indicator, attach-to-question, `look_at_screen` tool, continuous observation with change detection + rate limit; screenshots never stored.
+- [ ] Native OS capture in the desktop shell (system webviews may lack getDisplayMedia), with a monitor/window chooser.
+- [ ] Redaction of sensitive regions before sending; per-app allowlist.
 
 ## Phase 5 — Acting on your computer
 A tool layer with per-app adapters, all behind the security principles in ARCHITECTURE.md:

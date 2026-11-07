@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Avatar as SvgAvatar } from "./Avatar";
+import { serverBase } from "./net";
 import type { AvatarProps } from "./VrmAvatar";
 
 // three.js is large: only load it when a VRM model is actually available.
@@ -13,7 +14,7 @@ export function AvatarStage(props: AvatarProps) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/avatars/default.vrm")
+    fetch("/avatars/default.vrm", { headers: serverBase().token ? { authorization: `Bearer ${serverBase().token}` } : {} })
       .then((r) => (r.ok ? r.arrayBuffer() : null))
       .then((b) => !cancelled && b && isGlb(b) && setModel(b)) // dev servers may answer 200 with index.html
       .catch(() => {});

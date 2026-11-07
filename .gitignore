@@ -8,3 +8,7 @@ data/*.jsonl
 
 apps/web/public/avatars/*.vrm
 data/tts-test.*
+
+
+apps/desktop/src-tauri/target
+apps/desktop/src-tauri/gen

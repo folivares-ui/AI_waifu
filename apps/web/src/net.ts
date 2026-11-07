@@ -5,7 +5,9 @@ export function serverBase(): { http: string; ws: string; token: string } {
   if (token) localStorage.setItem("waifu_token", token);
   const env = import.meta.env.VITE_SERVER_URL as string | undefined;
   const secure = location.protocol === "https:";
-  const ws = env ?? `${secure ? "wss" : "ws"}://${location.hostname}:8787`;
+  // Vite dev server (5173) talks to the soul server on 8787; when the soul server itself serves the app, use its origin.
+  const dev = location.port === "5173";
+  const ws = env ?? `${secure ? "wss" : "ws"}://${dev ? `${location.hostname}:8787` : location.host}`;
   return { ws, http: ws.replace(/^ws/, "http"), token };
 }
 

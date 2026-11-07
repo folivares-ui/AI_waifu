@@ -1,12 +1,17 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { existsSync, readFileSync } from "node:fs";
+import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
+import { networkInterfaces } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import qrcode from "qrcode-terminal";
 import { WebSocketServer } from "ws";
 import type { Capabilities, ClientMessage } from "@waifu/core";
 import { createLLM } from "./llm/index.js";
 import { MemoryStore } from "./memory.js";
 import { Session } from "./session.js";
 import { loadSoul } from "./soul.js";
+import { createStaticHandler } from "./static.js";
 import { createToolFactory } from "./tools/index.js";
 import { createSTT } from "./stt/index.js";
 import { createTTS } from "./tts/index.js";
@@ -21,9 +26,11 @@ if (host !== "127.0.0.1" && host !== "localhost" && !token) {
 }
 // Browsers allowed to talk to us when no token is set. Without this check any website you visit
 // could open a WebSocket to localhost and chat with (and read the memories of) your companion.
-const allowedOrigins = new Set(
-  (process.env.ALLOWED_ORIGINS ?? "http://localhost:5173,http://127.0.0.1:5173").split(",").map((s) => s.trim()),
-);
+const allowedOrigins = new Set([
+  ...(process.env.ALLOWED_ORIGINS ?? "http://localhost:5173,http://127.0.0.1:5173").split(",").map((s) => s.trim()).filter(Boolean),
+  // The server's own origin, so the app it serves (same origin) can talk to it.
+  ...["http", "https"].flatMap((p) => [`${p}://localhost:${port}`, `${p}://127.0.0.1:${port}`]),
+]);
 
 const soul = loadSoul(process.env.SOUL_FILE ?? resolve(root, "souls/default.soul.json"));
 const llm = createLLM();
@@ -67,11 +74,20 @@ const json = (res: ServerResponse, code: number, body: unknown) => {
   res.end(JSON.stringify(body));
 };
 
-const http = createServer(async (req, res) => {
+const webDir = process.env.WEB_DIR ?? resolve(root, "apps/web/dist");
+const serveWeb = process.env.SERVE_WEB !== "0" && existsSync(resolve(webDir, "index.html"));
+// The avatar model is a personal asset: when a token is set, it needs the token like the API does.
+const serveStatic = serveWeb ? createStaticHandler(webDir, (p) => p.startsWith("/avatars/"), authorized) : undefined;
+
+const tlsCert = process.env.TLS_CERT;
+const tlsKey = process.env.TLS_KEY;
+const secure = !!(tlsCert && tlsKey);
+const handler = async (req: IncomingMessage, res: ServerResponse) => {
   cors(req, res);
   const path = new URL(req.url ?? "", "http://x").pathname;
   if (req.method === "OPTIONS") return void res.writeHead(204).end();
-  if (!authorized(req)) return json(res, 403, { error: "forbidden" });
+  const isApi = path === "/health" || path === "/stt";
+  if (isApi && !authorized(req)) return json(res, 403, { error: "forbidden" });
 
   if (path === "/health") return json(res, 200, { ok: true, soul: soul.name, llm: llm.name, tts: tts?.name ?? null, stt: stt?.name ?? null, memories: memory.size });
 
@@ -87,8 +103,12 @@ const http = createServer(async (req, res) => {
       return json(res, tooLarge ? 413 : 502, { error: err instanceof Error ? err.message : String(err) });
     }
   }
+  if (serveStatic?.(req, res, path)) return;
   res.writeHead(404).end();
-});
+};
+const http = secure
+  ? createHttpsServer({ cert: readFileSync(tlsCert!), key: readFileSync(tlsKey!) }, handler)
+  : createHttpServer(handler);
 
 const wss = new WebSocketServer({ server: http, path: "/ws", maxPayload: 3 * 1024 * 1024 /* screenshots */, verifyClient: ({ req }: { req: IncomingMessage }) => authorized(req) });
 wss.on("connection", (ws) => {
@@ -104,6 +124,32 @@ wss.on("connection", (ws) => {
   ws.on("close", () => session.close());
 });
 
+// When launched by the desktop shell, die with it even if it crashes or is killed (no orphan servers).
+const parentPid = Number(process.env.WAIFU_PARENT_PID);
+if (parentPid > 0) {
+  setInterval(() => {
+    try {
+      process.kill(parentPid, 0); // signal 0 = existence check only
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ESRCH") {
+        console.log("[server] parent process is gone, shutting down");
+        process.exit(0);
+      }
+    }
+  }, 2000).unref();
+}
+
 http.listen(port, host, () => {
-  console.log(`[${soul.name}] soul server on ${host}:${port} | brain=${llm.name} tts=${tts?.name ?? "browser"} stt=${stt?.name ?? "browser"} | memories=${memory.size}`);
+  const scheme = secure ? "https" : "http";
+  console.log(`[${soul.name}] soul server on ${scheme}://${host}:${port} | brain=${llm.name} tts=${tts?.name ?? "browser"} stt=${stt?.name ?? "browser"} | memories=${memory.size} | web=${serveWeb ? "served" : "not served (run npm run build)"}`);
+  if (serveWeb && token && host !== "127.0.0.1" && host !== "localhost") {
+    // Pairing links for phones/tablets/other PCs on your network. Treat them like a password.
+    const ips = Object.values(networkInterfaces()).flat().filter((n) => n && n.family === "IPv4" && !n.internal).map((n) => n!.address);
+    for (const ip of host === "0.0.0.0" ? ips : [host]) {
+      const url = `${scheme}://${ip}:${port}/?token=${encodeURIComponent(token)}`;
+      console.log(`[pair] ${url}`);
+      if (process.env.PAIR_QR !== "0") qrcode.generate(url, { small: true });
+    }
+    if (!secure) console.log("[pair] NOTE: phones only allow the microphone on HTTPS pages. Set TLS_CERT and TLS_KEY (see README).");
+  }
 });
