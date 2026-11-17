@@ -111,13 +111,15 @@ describe("OpenAICompatibleSTT", () => {
       for await (const c of req) raw += c.toString("latin1");
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ text: " hola mundo " }));
     });
-    const text = await new OpenAICompatibleSTT({ baseUrl: base, model: "whisper-x" }).transcribe(Buffer.from("RIFFxxxx"), "audio/wav", { lang: "es-ES" });
+    const text = await new OpenAICompatibleSTT({ baseUrl: base, model: "whisper-x" }).transcribe(Buffer.from("RIFFxxxx"), "audio/wav", { lang: "es-ES", prompt: "Rice Shower, Rice, Onii-sama." });
     expect(text).toBe("hola mundo");
     expect(ct).toMatch(/^multipart\/form-data/);
     expect(raw).toContain('name="model"');
     expect(raw).toContain("whisper-x");
     expect(raw).toContain('name="language"');
     expect(raw).toMatch(/\r\nes\r\n/);
+    expect(raw).toContain('name="prompt"');
+    expect(raw).toContain("Rice Shower, Rice, Onii-sama.");
     expect(raw).toContain('filename="audio.wav"');
   });
 });

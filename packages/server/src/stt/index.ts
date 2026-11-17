@@ -2,7 +2,8 @@ import { reachError } from "../tts/index.js";
 
 export interface STTProvider {
   readonly name: string;
-  transcribe(audio: Buffer, mime: string, opts: { lang?: string }, signal?: AbortSignal): Promise<string>;
+  /** `prompt`: words to help spell names right (Whisper-style "prompt"). */
+  transcribe(audio: Buffer, mime: string, opts: { lang?: string; prompt?: string }, signal?: AbortSignal): Promise<string>;
 }
 
 /**
@@ -15,11 +16,12 @@ export class OpenAICompatibleSTT implements STTProvider {
     this.name = o.name ?? "openai-compatible";
   }
 
-  async transcribe(audio: Buffer, mime: string, opts: { lang?: string }, signal?: AbortSignal): Promise<string> {
+  async transcribe(audio: Buffer, mime: string, opts: { lang?: string; prompt?: string }, signal?: AbortSignal): Promise<string> {
     const form = new FormData();
     form.append("file", new Blob([new Uint8Array(audio)], { type: mime }), mime.includes("wav") ? "audio.wav" : "audio.webm");
     form.append("model", this.o.model);
     if (opts.lang) form.append("language", opts.lang.slice(0, 2)); // ISO-639-1
+    if (opts.prompt) form.append("prompt", opts.prompt.slice(0, 400));
     const url = `${this.o.baseUrl.replace(/\/$/, "")}/audio/transcriptions`;
     const res = await fetch(url, {
       method: "POST",

@@ -1,5 +1,6 @@
 import {
   PROACTIVE_TURN_BASE,
+  matchName,
   SentenceChunker,
   prepareForSpeech,
   type Capabilities,
@@ -96,7 +97,7 @@ export class Session {
   }
 
   hello() {
-    this.send({ type: "ready", soul: { name: this.soul.name, voice: this.soul.voice }, caps: this.caps });
+    this.send({ type: "ready", soul: { name: this.soul.name, voice: this.soul.voice, names: this.soul.names }, caps: this.caps });
   }
 
   handle(msg: ClientMessage) {
@@ -109,7 +110,10 @@ export class Session {
         const text = String(msg.text ?? "").trim().slice(0, MAX_INPUT_CHARS);
         if (!text) return;
         const image = msg.image && this.caps.vision && validImage(msg.image) ? msg.image : undefined;
-        void this.runTurn(text, { image });
+        // Typed = the owner; voice = whoever is near the microphone. Her name is recognised in any spelling.
+        const named = matchName(text, this.soul.names);
+        const tag = `[${msg.source === "voice" ? "voz" : "texto"}${named.addressed ? " · te llamaron por tu nombre" : ""}]`;
+        void this.runTurn(`${tag} ${named.text}`, { image });
         return;
       }
       case "screen_frame": {

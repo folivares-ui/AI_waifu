@@ -11,7 +11,7 @@ import { ActionLog } from "./actionLog.js";
 import { createLLM } from "./llm/index.js";
 import { MemoryStore } from "./memory.js";
 import { Session } from "./session.js";
-import { loadSoul } from "./soul.js";
+import { loadSoul, sttHint } from "./soul.js";
 import { createStaticHandler } from "./static.js";
 import { browserForShutdown, createToolFactory } from "./tools/index.js";
 import { createSTT } from "./stt/index.js";
@@ -98,7 +98,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
     try {
       const audio = await readBody(req, MAX_AUDIO_BYTES);
       if (audio.length < 100) return json(res, 400, { error: "empty audio" });
-      const text = await stt.transcribe(audio, req.headers["content-type"] ?? "audio/wav", { lang: soul.voice.lang });
+      const text = await stt.transcribe(audio, req.headers["content-type"] ?? "audio/wav", { lang: soul.voice.lang, prompt: sttHint(soul) });
       return json(res, 200, { text });
     } catch (err) {
       const tooLarge = err instanceof Error && err.message === "too large";

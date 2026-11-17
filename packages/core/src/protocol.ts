@@ -12,7 +12,14 @@ export interface ScreenImage {
 }
 
 export type ClientMessage =
-  | { type: "user_text"; text: string; /** Screenshot the user explicitly attached to this message. */ image?: ScreenImage }
+  | {
+      type: "user_text";
+      text: string;
+      /** Screenshot the user explicitly attached to this message. */
+      image?: ScreenImage;
+      /** "text" = typed by the owner; "voice" = heard through the microphone (may be someone else). Default "text". */
+      source?: "text" | "voice";
+    }
   /** Reply to `screen_request`. `error: "not_sharing"` when the user has not enabled screen sharing. */
   | { type: "screen_frame"; requestId: string; image?: ScreenImage; error?: "not_sharing" | "failed" }
   /** Periodic frame sent only while the user has "continuous observation" switched on. */
@@ -24,7 +31,7 @@ export type ClientMessage =
   | { type: "hello" };
 
 export type ServerMessage =
-  | { type: "ready"; soul: { name: string; voice: VoiceHints }; caps: Capabilities }
+  | { type: "ready"; soul: { name: string; voice: VoiceHints; names?: import("./names.js").NameConfig }; caps: Capabilities }
   /** Streaming token (for text display). */
   | { type: "token"; turnId: number; text: string }
   /**

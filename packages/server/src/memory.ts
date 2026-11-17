@@ -56,7 +56,9 @@ export class MemoryStore {
 
 const EXTRACT_SYSTEM =
   "You extract durable facts worth remembering long-term about the USER (name, preferences, projects, goals, important events). " +
-  "Ignore small talk. Return ONLY a JSON array of short strings in the user's language; return [] if nothing is worth remembering.";
+  "Ignore small talk. Messages tagged [voz] were heard through a microphone and may come from another person: only keep facts that are clearly about the owner, " +
+  "and return [] if the speaker introduced themselves as someone else. Do not include the tags in the facts. " +
+  "Return ONLY a JSON array of short strings in the user's language; return [] if nothing is worth remembering.";
 
 /** Best-effort: asks the LLM for facts to keep. Never throws. */
 export async function extractFacts(llm: LLMProvider, userText: string, reply: string): Promise<string[]> {

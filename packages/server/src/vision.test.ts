@@ -51,7 +51,7 @@ describe("user-attached screenshot", () => {
     await until(() => done(out, 2));
     const hist = JSON.stringify(llm.calls[1].messages);
     expect(hist).not.toContain("QUJD");
-    expect(hist).toContain("[captura de pantalla compartida] que opinas?");
+    expect(hist).toContain("[captura de pantalla compartida] [texto] que opinas?");
     expect(llm.extractionCalls).toBe(1); // only the plain second turn was distilled into memory
   });
 

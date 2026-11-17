@@ -12,7 +12,8 @@ export class MockProvider implements LLMProvider {
       yield `[emotion:thinking] Veo tu pantalla, una imagen de unos ${kb} kilobytes. Soy el cerebro de prueba, asi que no puedo analizarla de verdad.`;
       return;
     }
-    const last = asText(req.messages.at(-1)?.content ?? "");
+    // user messages carry a "[texto]"/"[voz]" tag for the brain; the demo echo leaves it out
+    const last = asText(req.messages.at(-1)?.content ?? "").replace(/^\[[^\]]*\]\s*/, "");
     // Memory-extraction calls ask for JSON; return an empty list.
     if (req.system.includes("Return ONLY a JSON array")) {
       yield "[]";

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { EMOTIONS, type VoiceHints } from "@waifu/core";
+import { EMOTIONS, type NameConfig, type VoiceHints } from "@waifu/core";
 
 export interface Soul {
   name: string;
@@ -7,6 +7,10 @@ export interface Soul {
   voice: VoiceHints;
   persona: string;
   boundaries: string;
+  /** How she recognises her own name (aliases + speech-recognition misspellings). */
+  names?: NameConfig;
+  /** Her owner: the person who types to her and whose voice she normally hears. */
+  owner?: { name?: string; honorific?: string };
 }
 
 export function loadSoul(path: string): Soul {
@@ -18,7 +22,27 @@ export function loadSoul(path: string): Soul {
     voice: s.voice ?? { lang: s.language ?? "en-US", pitch: 1, rate: 1 },
     persona: s.persona,
     boundaries: s.boundaries ?? "",
+    names: s.names?.aliases?.length ? s.names : { aliases: [s.name] },
+    owner: s.owner,
   };
+}
+
+/** Words that help speech recognition spell her name and her owner's (Whisper "prompt"). */
+export function sttHint(soul: Soul): string {
+  return [...(soul.names?.aliases ?? [soul.name]), soul.owner?.honorific, soul.owner?.name].filter(Boolean).join(", ") + ".";
+}
+
+/** Who is who, and how to tell typed messages from voices that may belong to someone else. */
+function speakerRules(soul: Soul): string {
+  const hon = soul.owner?.honorific || "your owner";
+  const ownerName = soul.owner?.name?.trim();
+  const call = ownerName ? `"${hon}" or by their name, ${ownerName}` : `"${hon}"`;
+  return [
+    `Your owner is the person who looks after you; call them ${call}.`,
+    "Every user message starts with a tag: [texto] = typed by your owner (always your owner). [voz] = heard through the microphone: usually your owner, but someone else may be talking.",
+    `If a voice introduces itself as someone else ("soy Ana", "te habla Luis") or it is clearly another person, call that person by THEIR name (never "${hon}") until it is clear your owner is speaking again; if you do not know their name, shyly ask for it. Never tell other people your owner's private things or memories.`,
+    "A tag may also say you were called by your name: react naturally, like someone who hears their name.",
+  ].join(" ");
 }
 
 export function buildSystemPrompt(soul: Soul, memories: string[], hasTools = false, vision = false): string {
@@ -29,6 +53,7 @@ export function buildSystemPrompt(soul: Soul, memories: string[], hasTools = fal
     soul.persona,
     soul.boundaries,
     `Your name is ${soul.name}. Reply in the user's language (default: ${soul.language}).`,
+    speakerRules(soul),
     `Before each sentence whose mood changes you may put a tag like [emotion:happy]. Allowed emotions: ${EMOTIONS.join(", ")}. Tags are never spoken aloud.`,
     "Keep replies short (1-3 sentences) unless asked for detail, because they are spoken aloud.",
     hasTools
