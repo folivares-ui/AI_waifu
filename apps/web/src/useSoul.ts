@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PROACTIVE_TURN_BASE, type Capabilities, type ClientMessage, type Emotion, type ScreenImage, type ServerMessage, type VoiceHints } from "@waifu/core";
+import { PROACTIVE_TURN_BASE, type Capabilities, type ClientMessage, type Emotion, type ScreenImage, type ServerMessage, type VoiceHints, type NameConfig } from "@waifu/core";
 import { b64ToBuffer, type Clip } from "./player";
 import { serverBase } from "./net";
 
@@ -22,6 +22,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
   const [connected, setConnected] = useState(false);
   const [name, setName] = useState("...");
   const [voice, setVoice] = useState<VoiceHints>({ lang: "es-ES", pitch: 1, rate: 1 });
+  const [names, setNames] = useState<NameConfig>();
   const [caps, setCaps] = useState<Capabilities>({ tts: false, stt: false, vision: false });
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [error, setError] = useState<string>();
@@ -68,6 +69,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
         if (m.type === "ready") {
           setName(m.soul.name);
           setVoice(m.soul.voice);
+          setNames(m.soul.names);
           setCaps(m.caps);
         } else if (m.type === "token") {
           // Show text live; one chat line per turn.
@@ -112,12 +114,13 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
   }, []);
 
   const sendText = useCallback(
-    (text: string, image?: ScreenImage) => {
+    (text: string, opts: { image?: ScreenImage; source?: "text" | "voice" } = {}) => {
+      const { image, source = "text" } = opts;
       setLines((ls) => [...ls, { id: nextId.current++, who: "user", text: image ? `${text} [con captura de pantalla]` : text }]);
       ignoreUpTo.current = sent.current; // a new utterance replaces whatever was being answered
       proactiveIgnoreUpTo.current = proactiveSeen.current;
       sent.current++;
-      send({ type: "user_text", text, ...(image ? { image } : {}) });
+      send({ type: "user_text", text, source, ...(image ? { image } : {}) });
     },
     [send],
   );
@@ -125,6 +128,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
   return {
     connected,
     name,
+    names,
     voice,
     caps,
     toolStatus,

@@ -102,18 +102,6 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
   return mgr;
 }
 
-/** Bust framing that also fits tall hats / animal ears. Returns camera y, look-at y and distance. */
-export function bustFraming(vrm: VRM, headY: number, fovDeg: number): { camY: number; lookY: number; dist: number } {
-  const top = new THREE.Box3().setFromObject(vrm.scene).max.y;
-  const classic = { camY: headY - 0.05, lookY: headY - 0.07, dist: 1.6 };
-  if (!Number.isFinite(top) || top - headY < 0.3) return classic; // ordinary head: keep the tuned framing
-  const hi = top + 0.03;
-  const lo = headY - 0.36;
-  const dist = (hi - lo) / 2 / Math.tan(THREE.MathUtils.degToRad(fovDeg / 2));
-  const mid = (hi + lo) / 2;
-  return { camY: mid, lookY: mid, dist: Math.max(1.6, dist) };
-}
-
 /** Close-up for icons: the face, plus hat/ears when the model has them. */
 export function faceFraming(vrm: VRM, headY: number, fovDeg: number): { y: number; dist: number } {
   const top = new THREE.Box3().setFromObject(vrm.scene).max.y;
@@ -121,4 +109,21 @@ export function faceFraming(vrm: VRM, headY: number, fovDeg: number): { y: numbe
   const hi = top + 0.02;
   const lo = headY - 0.07; // just under the chin
   return { y: (hi + lo) / 2, dist: (hi - lo) / 2 / Math.tan(THREE.MathUtils.degToRad(fovDeg / 2)) };
+}
+
+/**
+ * Full-screen framing: from the top of the head (hat/ears included) down to the upper thighs, placed in the
+ * upper part of the view so the controls at the bottom do not cover her. Works for any aspect ratio.
+ */
+export function fullFraming(vrm: VRM, fovDeg: number, aspect: number): { y: number; dist: number } {
+  const box = new THREE.Box3().setFromObject(vrm.scene);
+  const hips = vrm.humanoid.getNormalizedBoneNode("hips")?.getWorldPosition(new THREE.Vector3()).y ?? box.min.y + (box.max.y - box.min.y) * 0.5;
+  const hi = box.max.y + 0.04;
+  const lo = hips - 0.2;
+  const visibleH = (hi - lo) / 0.7; // she fills the top ~70%, the controls take the rest
+  const tan = Math.tan(THREE.MathUtils.degToRad(fovDeg / 2));
+  const halfW = 0.42; // shoulders, arms and hair
+  const dist = Math.max(visibleH / 2 / tan, halfW / (tan * Math.max(aspect, 0.3)));
+  const visible = 2 * dist * tan;
+  return { y: hi - visible / 2, dist };
 }

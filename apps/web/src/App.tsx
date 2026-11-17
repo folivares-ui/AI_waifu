@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { encodeWav, looksLikeEcho, resample, type Emotion } from "@waifu/core";
+import { encodeWav, looksLikeEcho, matchName, resample, type Emotion, type ScreenImage } from "@waifu/core";
 import { ApprovalCard } from "./ApprovalCard";
 import { AvatarStage } from "./AvatarStage";
+import { CameraIcon, CloseIcon, EyeIcon, GearIcon, MicIcon, RoseIcon, ScreenIcon, SendIcon, StopIcon } from "./icons";
 import { startMic, type MicHandle } from "./mic";
 import { transcribe } from "./net";
 import { ClipPlayer } from "./player";
@@ -21,6 +22,7 @@ export function App() {
   const [micError, setMicError] = useState<string>();
   const [sharing, setSharing] = useState(false);
   const [watching, setWatching] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const screen = useRef<ScreenShare | undefined>(undefined);
   const watchRef = useRef(false);
   watchRef.current = watching;
@@ -67,6 +69,20 @@ export function App() {
   });
   const { caps, voice } = soul;
 
+  /** Sends a message; if it calls her by name she reacts at once (ears up), before the answer arrives. */
+  const say = (t: string, opts: { image?: ScreenImage; source?: "text" | "voice" } = {}) => {
+    if (matchName(t, soul.names).addressed) setEmotion("surprised");
+    soul.sendText(t, opts);
+  };
+
+  // Errors are shown as a toast that goes away by itself.
+  const errorText = micError ?? soul.error;
+  useEffect(() => {
+    if (!micError) return;
+    const t = setTimeout(() => setMicError(undefined), 7000);
+    return () => clearTimeout(t);
+  }, [micError]);
+
   useEffect(() => {
     speaker.current ??= new Speaker(voice, setSpeaking);
     speaker.current.setVoice(voice);
@@ -112,7 +128,7 @@ export function App() {
             const recent = performance.now() - (player.current?.lastEnded ?? 0) < ECHO_WINDOW_MS;
             if ((ev.startedDuringBoost || recent) && looksLikeEcho(t, spoken.current)) return; // it was her own voice
             stopSpeech();
-            soul.sendText(t);
+            say(t, { source: "voice" });
           })
           .catch((e) => {
             setStatus("");
@@ -133,7 +149,7 @@ export function App() {
       onFinal: (t) => {
         if (busy() && !headphonesRef.current) return;
         stopSpeech();
-        soul.sendText(t);
+        say(t, { source: "voice" });
       },
       onError: (m) => {
         setMicError(m);
@@ -180,7 +196,7 @@ export function App() {
     if (!t) return;
     void getPlayer().unlock();
     stopSpeech();
-    soul.sendText(t);
+    say(t);
     setText("");
   };
 
@@ -208,7 +224,7 @@ export function App() {
     if (!img) return setMicError("Primero pulsa 'Compartir pantalla'.");
     void getPlayer().unlock();
     stopSpeech();
-    soul.sendText(text.trim() || "Mira mi pantalla. ¿Que ves y como podria mejorarlo?", img);
+    say(text.trim() || "Mira mi pantalla. ¿Que ves y como podria mejorarlo?", { image: img });
     setText("");
   };
 
@@ -226,58 +242,151 @@ export function App() {
   }, [watching]);
 
   const canListen = caps.stt || sttSupported;
+  const short = soul.names?.aliases.at(-1) ?? soul.name;
+  const mood = !soul.connected
+    ? "Sin conexion"
+    : soul.toolStatus ?? (status || (speaking ? "Hablando..." : listening ? "Te escucho..." : "En linea"));
+
   return (
-    <main>
-      <header>
-        <h1>{soul.name}</h1>
-        <span className={soul.connected ? "dot on" : "dot"} title={soul.connected ? "Conectada" : "Sin conexion"} />
-        <small className="mode">
-          voz: {caps.stt ? "servidor" : "navegador"} / {caps.tts ? "servidor" : "navegador"}
-        </small>
-      </header>
+    <div className="app">
       <AvatarStage emotion={emotion} speaking={speaking} listening={listening} getLevel={getLevel} />
-      <section className="log" aria-live="polite">
-        {soul.lines.slice(-30).map((l) => (
-          <p key={l.id} className={l.who}>
-            <b>{l.who === "user" ? "Tu" : soul.name}:</b> {l.text}
-          </p>
-        ))}
-        {(status || soul.toolStatus) && <p className="status">{soul.toolStatus ?? status}</p>}
-      </section>
-      {sharing && (
-        <p className="sharing" role="status">
-          <span className="rec" /> {watching ? "Observando tu pantalla" : "Pantalla compartida"} (nada se guarda; solo se envia al servidor cuando ella mira)
-        </p>
-      )}
-      {soul.approvals.map((r) => (
-        <ApprovalCard key={r.id} req={r} name={soul.name} onAnswer={(ok) => soul.answerApproval(r.id, ok)} />
-      ))}
-      {(soul.error || micError) && <p className="err">{micError ?? soul.error}</p>}
-      <div className="controls">
-        <button onClick={() => void toggleMic()} disabled={!canListen} className={listening ? "active" : ""}>
-          {listening ? "Dejar de escuchar" : "Hablar"}
-        </button>
-        <label title="Con auriculares la interrupcion por voz es mas sensible.">
-          <input type="checkbox" checked={headphones} onChange={(e) => setHeadphones(e.target.checked)} /> Uso auriculares
-        </label>
-        <button onClick={() => { stopSpeech(); soul.interrupt(); }}>Callar</button>
-      </div>
-      {soul.caps.vision && ScreenShare.supported && (
-        <div className="controls">
-          <button onClick={() => void toggleShare()} className={sharing ? "active" : ""} title="Elige una VENTANA concreta en vez de toda la pantalla para no mostrar otras apps.">
-            {sharing ? "Dejar de compartir" : "Compartir pantalla"}
+      <div className="veil veil-top" aria-hidden="true" />
+      <div className="veil veil-bottom" aria-hidden="true" />
+
+      <header className="topbar">
+        <div className="title">
+          <span className="crest" aria-hidden="true">
+            <RoseIcon size={18} />
+          </span>
+          <div>
+            <h1>{soul.name}</h1>
+            <p className="mood">
+              <span className={soul.connected ? "dot on" : "dot"} aria-hidden="true" /> {mood}
+            </p>
+          </div>
+        </div>
+        <div className="top-actions">
+          <button type="button" className="chip" aria-label="Capturar" title="Guardar una foto de ella" onClick={() => window.dispatchEvent(new CustomEvent("waifu:capture", { detail: { name: soul.name } }))}>
+            <CameraIcon size={18} /> <span>Capturar</span>
           </button>
-          <button onClick={askAboutScreen} disabled={!sharing}>Preguntar por mi pantalla</button>
-          <label title="Ella comentara de vez en cuando si ve algo util (como mucho una vez cada ~25 s, solo si la pantalla cambio).">
-            <input type="checkbox" checked={watching} disabled={!sharing} onChange={(e) => setWatching(e.target.checked)} /> Observacion continua
+          <button type="button" className="round small" aria-label="Ajustes" title="Ajustes" onClick={() => setSettingsOpen(true)}>
+            <GearIcon size={20} />
+          </button>
+        </div>
+      </header>
+
+      {sharing && (
+        <div className="sharing" role="status">
+          <span className="rec" aria-hidden="true" /> {watching ? "Observando tu pantalla" : "Pantalla compartida"}
+          <label className="switch" title="Ella comentara de vez en cuando si ve algo util (como mucho una vez cada ~25 s, solo si la pantalla cambio).">
+            <input type="checkbox" checked={watching} onChange={(e) => setWatching(e.target.checked)} /> Observacion continua
           </label>
         </div>
       )}
-      {!canListen && <p className="err">Tu navegador no soporta reconocimiento de voz (usa Chrome o Edge) y el servidor no tiene STT. Puedes escribir.</p>}
-      <form onSubmit={submit}>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="O escribe aqui..." />
-        <button type="submit">Enviar</button>
-      </form>
-    </main>
+
+      <div className={`bottom${soul.approvals.length ? " asking" : ""}`}>
+        <section className="log" aria-live="polite" aria-label="Conversacion">
+          {soul.lines.slice(-30).map((l) => (
+            <p key={l.id} className={`bubble ${l.who}`}>
+              {l.who === "soul" && <b>{soul.name}</b>}
+              <span>{l.text}</span>
+            </p>
+          ))}
+        </section>
+
+        {soul.approvals.map((r) => (
+          <ApprovalCard key={r.id} req={r} name={short} onAnswer={(ok) => soul.answerApproval(r.id, ok)} />
+        ))}
+
+        <div className="dock">
+          <div className="controls">
+            {soul.caps.vision && ScreenShare.supported && (
+              <button
+                type="button"
+                className={`round${sharing ? " on" : ""}`}
+                aria-label={sharing ? "Dejar de compartir" : "Compartir pantalla"}
+                title={sharing ? "Dejar de compartir la pantalla" : "Compartir una ventana (mejor que toda la pantalla)"}
+                onClick={() => void toggleShare()}
+              >
+                <ScreenIcon />
+              </button>
+            )}
+            {soul.caps.vision && ScreenShare.supported && (
+              <button type="button" className="round" aria-label="Preguntar por mi pantalla" title="Preguntarle por lo que se ve en tu pantalla" onClick={askAboutScreen} disabled={!sharing}>
+                <EyeIcon />
+              </button>
+            )}
+            <button
+              type="button"
+              className={`mic${listening ? " on" : ""}`}
+              aria-label={listening ? "Dejar de escuchar" : "Hablar"}
+              aria-pressed={listening}
+              title={canListen ? (listening ? "Dejar de escuchar" : `Hablar con ${short}`) : "Sin reconocimiento de voz aqui: escribele o configura STT_PROVIDER"}
+              onClick={() => void toggleMic()}
+              disabled={!canListen}
+            >
+              <MicIcon size={30} />
+            </button>
+            <button type="button" className="round" aria-label="Callar" title="Que deje de hablar" onClick={() => { stopSpeech(); soul.interrupt(); }}>
+              <StopIcon />
+            </button>
+          </div>
+          <form className="composer" onSubmit={submit}>
+            <input value={text} onChange={(e) => setText(e.target.value)} placeholder={`Escribele a ${short}...`} aria-label={`Mensaje para ${soul.name}`} />
+            <button type="submit" className="send" aria-label="Enviar" disabled={!text.trim()}>
+              <SendIcon size={18} /> <span>Enviar</span>
+            </button>
+          </form>
+        </div>
+      </div>
+
+      {errorText && (
+        <p className="toast" role="alert">
+          {errorText}
+        </p>
+      )}
+
+      {settingsOpen && (
+        <div className="sheet-backdrop" onClick={() => setSettingsOpen(false)}>
+          <section className="sheet" role="dialog" aria-modal="true" aria-label="Ajustes" onClick={(e) => e.stopPropagation()}>
+            <header>
+              <h2>Ajustes</h2>
+              <button type="button" className="round small" aria-label="Cerrar ajustes" onClick={() => setSettingsOpen(false)}>
+                <CloseIcon size={18} />
+              </button>
+            </header>
+            <label className="row">
+              <span>
+                Uso auriculares
+                <small>Permite interrumpirla hablando con mas sensibilidad.</small>
+              </span>
+              <input type="checkbox" checked={headphones} onChange={(e) => setHeadphones(e.target.checked)} />
+            </label>
+            <label className="row file">
+              <span>
+                Cambiar modelo 3D
+                <small>Carga otro archivo .vrm solo para esta sesion.</small>
+              </span>
+              <span className="btn">Elegir .vrm</span>
+              <input type="file" accept=".vrm,.glb" hidden onChange={(e) => e.target.files?.[0] && window.dispatchEvent(new CustomEvent("waifu:load-model", { detail: e.target.files[0] }))} />
+            </label>
+            <div className="row info">
+              <span>
+                Voz
+                <small>
+                  Oido: {caps.stt ? "servidor" : sttSupported ? "navegador" : "no disponible (escribe)"} · Habla: {caps.tts ? "servidor" : "navegador"}
+                </small>
+              </span>
+            </div>
+            <div className="row info">
+              <span>
+                Atajo en la app de escritorio
+                <small>Ctrl + Mayus + Espacio activa o desactiva el microfono desde cualquier programa.</small>
+              </span>
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
   );
 }

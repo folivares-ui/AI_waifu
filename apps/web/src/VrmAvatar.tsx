@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 import type { Emotion } from "@waifu/core";
-import { addSpringChains, bustFraming, faceFraming, hideHelperMeshes, toonify } from "./avatarFixups";
+import { addSpringChains, faceFraming, fullFraming, hideHelperMeshes, toonify } from "./avatarFixups";
 import { BoneFaceRig, CHANNEL_NAMES, RIG_POSES, type Channel } from "./boneFace";
 
 export interface AvatarProps {
@@ -64,12 +64,14 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
     let twitchT = -1;
     let twitchSide: Channel = "earTwitchL";
 
+    let frame: () => void = () => {}; // re-aims the camera for the current window shape
     const resize = () => {
       const w = el.clientWidth || 300;
       const h = el.clientHeight || 360;
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
+      frame();
     };
     const ro = new ResizeObserver(resize);
     ro.observe(el);
@@ -108,15 +110,12 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         v.scene.updateMatrixWorld(true);
         const head = bone("head")!.getWorldPosition(new THREE.Vector3());
         // The head bone sits at the base of the skull: frame from above the hair down to the chest.
-        if (CAPTURE_FACE) {
-          const f = faceFraming(v, head.y, camera.fov);
+        frame = () => {
+          const f = CAPTURE_FACE ? faceFraming(v, head.y, camera.fov) : fullFraming(v, camera.fov, camera.aspect);
           camera.position.set(0, f.y, f.dist);
           camera.lookAt(0, f.y, 0);
-        } else {
-          const f = bustFraming(v, head.y, camera.fov); // also fits tall hats / animal ears
-          camera.position.set(0, f.camY, f.dist);
-          camera.lookAt(0, f.lookY, 0);
-        }
+        };
+        frame();
         gaze.position.set(0, head.y + 0.08, 1.6);
         if (v.lookAt) v.lookAt.target = gaze;
       })
@@ -214,7 +213,30 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
     };
     tick();
 
+    // "Capturar": a PNG of her over the app background.
+    const onCapture = (e: Event) => {
+      renderer.render(scene, camera); // the WebGL buffer is only valid right after a render
+      const src = renderer.domElement;
+      const out = document.createElement("canvas");
+      out.width = src.width;
+      out.height = src.height;
+      const ctx = out.getContext("2d")!;
+      const g = ctx.createRadialGradient(out.width / 2, out.height * 0.35, 0, out.width / 2, out.height * 0.35, out.height * 0.9);
+      g.addColorStop(0, "#3b3a8f");
+      g.addColorStop(1, "#0d0b1d");
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, out.width, out.height);
+      ctx.drawImage(src, 0, 0);
+      const name = String((e as CustomEvent<{ name?: string }>).detail?.name ?? "avatar").replace(/\s+/g, "-");
+      const a = document.createElement("a");
+      a.download = `${name}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.png`;
+      a.href = out.toDataURL("image/png");
+      a.click();
+    };
+    window.addEventListener("waifu:capture", onCapture);
+
     return () => {
+      window.removeEventListener("waifu:capture", onCapture);
       disposed = true;
       cancelAnimationFrame(raf);
       ro.disconnect();

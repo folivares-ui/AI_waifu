@@ -23,6 +23,13 @@ export function AvatarStage(props: AvatarProps) {
     };
   }, []);
 
+  // "Cambiar modelo 3D" in the settings sheet.
+  useEffect(() => {
+    const h = (e: Event) => void pick((e as CustomEvent<File>).detail);
+    window.addEventListener("waifu:load-model", h);
+    return () => window.removeEventListener("waifu:load-model", h);
+  });
+
   const pick = async (file?: File) => {
     if (!file) return;
     const b = await file.arrayBuffer();
@@ -39,10 +46,6 @@ export function AvatarStage(props: AvatarProps) {
       ) : (
         <SvgAvatar emotion={props.emotion} speaking={props.speaking} listening={props.listening} />
       )}
-      <label className="load-vrm">
-        Cargar modelo VRM
-        <input type="file" accept=".vrm,.glb" hidden onChange={(e) => void pick(e.target.files?.[0])} />
-      </label>
     </div>
   );
 }
