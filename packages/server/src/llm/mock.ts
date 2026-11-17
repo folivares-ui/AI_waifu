@@ -47,13 +47,21 @@ export class MockProvider implements LLMProvider {
     }
     if (Array.isArray(lastMsg.content) && lastMsg.content[0]?.type === "tool_result") {
       const text = lastMsg.content[0].content.replace(/<[^>]+>/g, "").split("\n").filter((l) => l.startsWith("- ")).slice(0, 2).join(" | ");
-      yield { type: "text", text: `[emotion:happy] Mira lo que encontre: ${text || "nada"}.` };
+      const first = lastMsg.content[0].content.replace(/<[^>]+>/g, "").trim().split("\n")[0].slice(0, 140);
+      yield { type: "text", text: text ? `[emotion:happy] Mira lo que encontre: ${text}.` : `Resultado: ${first}` };
       return;
     }
     const m = asText(lastMsg.content).match(/tool:search_apis\s+(.+)/);
     if (/tool:look/.test(asText(lastMsg.content)) && req.tools.some((t) => t.name === "look_at_screen")) {
       yield { type: "text", text: "Echo un vistazo. " };
       yield { type: "tool_use", id: "mock_2", name: "look_at_screen", input: {} };
+      return;
+    }
+    // Generic demo/test trigger: "tool:<name> {json input}" calls any available tool.
+    const g = asText(lastMsg.content).match(/tool:([a-z_]+)\s+(\{[\s\S]*\})\s*$/);
+    if (g && req.tools.some((t) => t.name === g[1])) {
+      yield { type: "text", text: "Voy a hacerlo. " };
+      yield { type: "tool_use", id: `mock_${Date.now()}`, name: g[1], input: JSON.parse(g[2]) };
       return;
     }
     if (m && req.tools.some((t) => t.name === "search_apis")) {

@@ -32,3 +32,11 @@ body.capture { background: transparent; }
 body.capture main { max-width: none; padding: 0; }
 body.capture header, body.capture .log, body.capture .controls, body.capture form, body.capture .load-vrm, body.capture .err, body.capture .sharing { display: none; }
 body.capture .vrm { width: 1024px; height: 1024px; max-height: none; border-radius: 0; background: none; }
+.approval { border: 2px solid #ffb84d; background: #2a2236; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.approval-title { margin: 0; line-height: 1.35; }
+.approval-details { margin: 0; max-height: 220px; overflow: auto; background: #15121f; border-radius: 8px; padding: 8px; font-size: .78rem; white-space: pre-wrap; word-break: break-word; }
+.approval-preview { max-width: 100%; border-radius: 8px; }
+.approval-buttons { display: flex; gap: 8px; justify-content: flex-end; }
+.approval-buttons .allow { background: #2e9d5b; }
+.approval-buttons .deny { background: #5a5470; }
+.approval-tool { margin: 0; font-size: .7rem; opacity: .6; }

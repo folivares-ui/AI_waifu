@@ -26,6 +26,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [error, setError] = useState<string>();
   const [toolStatus, setToolStatus] = useState<string>();
+  const [approvals, setApprovals] = useState<Extract<ServerMessage, { type: "approval_request" }>[]>([]);
   const nextId = useRef(1);
   const currentTurn = useRef(0);
   // Server turn ids are sequential per connection (n-th user_text = turn n). Anything at or below
@@ -59,6 +60,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
       };
       sock.onclose = () => {
         setConnected(false);
+        setApprovals([]); // the server forgets pending approvals with the connection
         if (!closed) retry = setTimeout(connect, 2000);
       };
       sock.onmessage = (ev) => {
@@ -81,6 +83,10 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
           if (!dropped(m.turnId)) h.current.onSentence(m.text, m.emotion);
         } else if (m.type === "audio") {
           if (!dropped(m.turnId)) h.current.onAudio({ data: b64ToBuffer(m.data), emotion: m.emotion, text: m.text });
+        } else if (m.type === "approval_request") {
+          setApprovals((a) => [...a, m]);
+        } else if (m.type === "approval_cancel") {
+          setApprovals((a) => a.filter((x) => x.id !== m.id));
         } else if (m.type === "screen_request") {
           h.current.onScreenRequest(m.requestId);
         } else if (m.type === "tool") {
@@ -128,6 +134,13 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
     sendScreenFrame: (requestId: string, image?: ScreenImage, error?: "not_sharing" | "failed") =>
       send({ type: "screen_frame", requestId, ...(image ? { image } : {}), ...(error ? { error } : {}) }),
     sendWatch: (image: ScreenImage) => send({ type: "screen_watch", image }),
+    approvals,
+    answerApproval: (id: string, approved: boolean) => {
+      const a = approvals.find((x) => x.id === id);
+      setApprovals((list) => list.filter((x) => x.id !== id));
+      if (a) setLines((ls) => [...ls, { id: nextId.current++, who: "user", text: `${approved ? "✔ Permitido" : "✖ No permitido"}: ${a.summary}` }]);
+      send({ type: "approval_response", id, approved });
+    },
     interrupt: () => {
       ignoreUpTo.current = sent.current;
       proactiveIgnoreUpTo.current = proactiveSeen.current;

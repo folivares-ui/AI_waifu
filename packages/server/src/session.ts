@@ -8,9 +8,11 @@ import {
   type ScreenImage,
   type ServerMessage,
 } from "@waifu/core";
+import { ActionLog } from "./actionLog.js";
 import type { ChatMessage, ContentBlock, LLMEvent, LLMProvider } from "./llm/index.js";
 import { extractFacts, type MemoryStore } from "./memory.js";
 import { buildSystemPrompt, type Soul } from "./soul.js";
+import type { ApprovalInfo } from "./tools/types.js";
 import type { Tool, ToolContext } from "./tools/index.js";
 import type { TTSProvider } from "./tts/index.js";
 
@@ -30,6 +32,10 @@ export interface SessionOptions {
   watchMinIntervalMs?: number;
   /** How long to wait for the client to answer a screen request. */
   screenTimeoutMs?: number;
+  /** How long an approval card waits for the user before counting as "no". */
+  approvalTimeoutMs?: number;
+  /** Where approved/denied actions are recorded. */
+  actionLog?: ActionLog;
   /** Clock for tests. */
   now?: () => number;
 }
@@ -67,6 +73,9 @@ export class Session {
   private watchMin: number;
   private now: () => number;
   private screenTimeout: number;
+  private approvalWaiters = new Map<string, (approved: boolean) => void>();
+  private approvalTimeout: number;
+  private actionLog: ActionLog;
 
   constructor(
     private soul: Soul,
@@ -80,6 +89,8 @@ export class Session {
     this.watchMin = opts.watchMinIntervalMs ?? 25_000;
     this.now = opts.now ?? Date.now;
     this.screenTimeout = opts.screenTimeoutMs ?? 8000;
+    this.approvalTimeout = opts.approvalTimeoutMs ?? 120_000;
+    this.actionLog = opts.actionLog ?? new ActionLog();
     const ctx: ToolContext = { requestScreen: (signal) => this.requestScreen(signal) };
     this.tools = typeof opts.tools === "function" ? opts.tools(ctx) : (opts.tools ?? []);
   }
@@ -108,6 +119,12 @@ export class Session {
         w(!msg.error && validImage(msg.image) ? msg.image : undefined);
         return;
       }
+      case "approval_response": {
+        const w = this.approvalWaiters.get(String(msg.id));
+        if (!w) return; // unknown, expired or already answered: never pre-approvable
+        w(msg.approved === true);
+        return;
+      }
       case "screen_watch": {
         // Only while idle, only if vision works, and never more often than the configured interval.
         if (!this.caps.vision || this.busy || !validImage(msg.image)) return;
@@ -123,6 +140,26 @@ export class Session {
     this.abort?.abort();
     for (const w of this.screenWaiters.values()) w(undefined);
     this.screenWaiters.clear();
+    for (const w of [...this.approvalWaiters.values()]) w(false);
+  }
+
+  /** Shows the approval card and waits. Resolves false on "no", timeout or cancellation. */
+  private requestApproval(tool: string, info: ApprovalInfo, signal: AbortSignal): Promise<boolean> {
+    return new Promise((resolve) => {
+      const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      const finish = (approved: boolean, cancelled: boolean) => {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", onAbort);
+        if (!this.approvalWaiters.delete(id)) return;
+        if (cancelled) this.send({ type: "approval_cancel", id });
+        resolve(approved);
+      };
+      const onAbort = () => finish(false, true);
+      const timer = setTimeout(() => finish(false, true), this.approvalTimeout);
+      signal.addEventListener("abort", onAbort);
+      this.approvalWaiters.set(id, (approved) => finish(approved, false));
+      this.send({ type: "approval_request", id, tool, summary: info.summary, ...(info.details ? { details: info.details } : {}), ...(info.preview ? { preview: info.preview } : {}) });
+    });
   }
 
   /** Asks the client for a frame. Resolves undefined if not sharing, on timeout or if the turn is cancelled. */
@@ -255,6 +292,29 @@ export class Session {
             ok = false;
           } else {
             calls++;
+            // Actions that change things always go through the user first. Enforced here, not by each tool.
+            let denied: string | undefined;
+            let info: ApprovalInfo | undefined;
+            if (tool.kind === "write") {
+              try {
+                info = (await tool.describe?.(u.input)) ?? { summary: `${u.name} ${JSON.stringify(u.input).slice(0, 300)}` };
+              } catch (e) {
+                denied = `Error: ${e instanceof Error ? e.message : String(e)}`; // invalid request: never shown to the user
+              }
+              if (info && !denied) {
+                const approved = await this.requestApproval(u.name, info, abort.signal);
+                if (!approved) {
+                  this.actionLog.record({ tool: u.name, summary: info.summary, approved: false });
+                  denied = abort.signal.aborted
+                    ? "Cancelled."
+                    : "The user did NOT approve this action (or did not answer in time). It was not performed. Do not retry it unless the user asks; ask what they would like instead.";
+                }
+              }
+            }
+            if (denied !== undefined) {
+              results.push({ type: "tool_result", tool_use_id: u.id, content: denied, is_error: true });
+              continue;
+            }
             this.send({ type: "tool", turnId, name: u.name, status: "start" });
             try {
               const r = await tool.run(u.input, abort.signal);
@@ -270,6 +330,7 @@ export class Session {
               content = `Error: ${e instanceof Error ? e.message : String(e)}`;
               ok = false;
             }
+            if (info) this.actionLog.record({ tool: u.name, summary: info.summary, approved: true, ok, ...(ok ? {} : { error: content }) });
             this.send({ type: "tool", turnId, name: u.name, status: "end", ok });
           }
           results.push({ type: "tool_result", tool_use_id: u.id, content, ...(ok ? {} : { is_error: true }) });

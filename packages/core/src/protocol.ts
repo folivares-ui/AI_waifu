@@ -17,6 +17,8 @@ export type ClientMessage =
   | { type: "screen_frame"; requestId: string; image?: ScreenImage; error?: "not_sharing" | "failed" }
   /** Periodic frame sent only while the user has "continuous observation" switched on. */
   | { type: "screen_watch"; image: ScreenImage }
+  /** The user's answer to an `approval_request`. Only answers to pending requests are accepted. */
+  | { type: "approval_response"; id: string; approved: boolean }
   /** User started speaking / sent new input while the soul is talking: stop current turn. */
   | { type: "interrupt" }
   | { type: "hello" };
@@ -36,6 +38,13 @@ export type ServerMessage =
   | { type: "tool"; turnId: number; name: string; status: "start" | "end"; ok?: boolean }
   /** The soul wants to look at the screen (tool call). Client answers with `screen_frame`. */
   | { type: "screen_request"; requestId: string }
+  /**
+   * The soul wants to do something that changes things outside the conversation (save a file, click, type...).
+   * Nothing happens unless the user approves. `details` is plain text (e.g. a diff or a script) to show verbatim.
+   */
+  | { type: "approval_request"; id: string; tool: string; summary: string; details?: string; preview?: ScreenImage }
+  /** A pending approval expired or its turn was cancelled: hide it. */
+  | { type: "approval_cancel"; id: string }
   | { type: "done"; turnId: number; interrupted: boolean }
   | { type: "error"; message: string };
 

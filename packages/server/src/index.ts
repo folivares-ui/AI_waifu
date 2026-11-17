@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import qrcode from "qrcode-terminal";
 import { WebSocketServer } from "ws";
 import type { Capabilities, ClientMessage } from "@waifu/core";
+import { ActionLog } from "./actionLog.js";
 import { createLLM } from "./llm/index.js";
 import { MemoryStore } from "./memory.js";
 import { Session } from "./session.js";
@@ -39,6 +40,7 @@ const stt = createSTT();
 const makeTools = createToolFactory();
 const caps: Capabilities = { tts: !!tts, stt: !!stt, vision: !!llm.vision };
 const memory = new MemoryStore(process.env.MEMORY_FILE ?? resolve(root, "data/memory.json"));
+const actionLog = new ActionLog(process.env.ACTIONS_LOG ?? resolve(root, "data/actions.jsonl"));
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 
 function authorized(req: IncomingMessage): boolean {
@@ -112,7 +114,7 @@ const http = secure
 
 const wss = new WebSocketServer({ server: http, path: "/ws", maxPayload: 3 * 1024 * 1024 /* screenshots */, verifyClient: ({ req }: { req: IncomingMessage }) => authorized(req) });
 wss.on("connection", (ws) => {
-  const session = new Session(soul, llm, memory, (m) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m)), { tts, caps, tools: makeTools, watchMinIntervalMs: Number(process.env.WATCH_MIN_INTERVAL_MS ?? 25000) });
+  const session = new Session(soul, llm, memory, (m) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m)), { tts, caps, tools: makeTools, watchMinIntervalMs: Number(process.env.WATCH_MIN_INTERVAL_MS ?? 25000), actionLog, approvalTimeoutMs: Number(process.env.APPROVAL_TIMEOUT_MS ?? 120000) });
   session.hello();
   ws.on("message", (data) => {
     try {

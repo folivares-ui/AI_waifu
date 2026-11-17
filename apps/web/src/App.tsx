@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { encodeWav, looksLikeEcho, resample, type Emotion } from "@waifu/core";
+import { ApprovalCard } from "./ApprovalCard";
 import { AvatarStage } from "./AvatarStage";
 import { startMic, type MicHandle } from "./mic";
 import { transcribe } from "./net";
@@ -247,6 +248,9 @@ export function App() {
           <span className="rec" /> {watching ? "Observando tu pantalla" : "Pantalla compartida"} (nada se guarda; solo se envia al servidor cuando ella mira)
         </p>
       )}
+      {soul.approvals.map((r) => (
+        <ApprovalCard key={r.id} req={r} name={soul.name} onAnswer={(ok) => soul.answerApproval(r.id, ok)} />
+      ))}
       {(soul.error || micError) && <p className="err">{micError ?? soul.error}</p>}
       <div className="controls">
         <button onClick={() => void toggleMic()} disabled={!canListen} className={listening ? "active" : ""}>
