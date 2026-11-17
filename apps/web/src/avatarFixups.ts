@@ -113,3 +113,12 @@ export function bustFraming(vrm: VRM, headY: number, fovDeg: number): { camY: nu
   const mid = (hi + lo) / 2;
   return { camY: mid, lookY: mid, dist: Math.max(1.6, dist) };
 }
+
+/** Close-up for icons: the face, plus hat/ears when the model has them. */
+export function faceFraming(vrm: VRM, headY: number, fovDeg: number): { y: number; dist: number } {
+  const top = new THREE.Box3().setFromObject(vrm.scene).max.y;
+  if (!Number.isFinite(top) || top - headY < 0.3) return { y: headY + 0.045, dist: 1.15 }; // ordinary head
+  const hi = top + 0.02;
+  const lo = headY - 0.07; // just under the chin
+  return { y: (hi + lo) / 2, dist: (hi - lo) / 2 / Math.tan(THREE.MathUtils.degToRad(fovDeg / 2)) };
+}

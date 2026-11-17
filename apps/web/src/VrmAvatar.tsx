@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 import type { Emotion } from "@waifu/core";
-import { addSpringChains, bustFraming, hideHelperMeshes, toonify } from "./avatarFixups";
+import { addSpringChains, bustFraming, faceFraming, hideHelperMeshes, toonify } from "./avatarFixups";
 import { BoneFaceRig, CHANNEL_NAMES, RIG_POSES, type Channel } from "./boneFace";
 
 export interface AvatarProps {
@@ -109,8 +109,9 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         const head = bone("head")!.getWorldPosition(new THREE.Vector3());
         // The head bone sits at the base of the skull: frame from above the hair down to the chest.
         if (CAPTURE_FACE) {
-          camera.position.set(0, head.y + 0.045, 1.15);
-          camera.lookAt(0, head.y + 0.045, 0);
+          const f = faceFraming(v, head.y, camera.fov);
+          camera.position.set(0, f.y, f.dist);
+          camera.lookAt(0, f.y, 0);
         } else {
           const f = bustFraming(v, head.y, camera.fov); // also fits tall hats / animal ears
           camera.position.set(0, f.camY, f.dist);
