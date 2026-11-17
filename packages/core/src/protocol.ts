@@ -24,6 +24,10 @@ export type ClientMessage =
   | { type: "screen_frame"; requestId: string; image?: ScreenImage; error?: "not_sharing" | "failed" }
   /** Periodic frame sent only while the user has "continuous observation" switched on. */
   | { type: "screen_watch"; image: ScreenImage }
+  /** The user stroked part of her body with the cursor (she answers with a short in-character reaction). */
+  | { type: "touch"; region: TouchRegion }
+  /** The user made a hand gesture in front of the camera (recognised on the device; no images are sent). */
+  | { type: "gesture"; gesture: Gesture }
   /** The user's answer to an `approval_request`. Only answers to pending requests are accepted. */
   | { type: "approval_response"; id: string; approved: boolean }
   /** User started speaking / sent new input while the soul is talking: stop current turn. */
@@ -78,3 +82,15 @@ export interface VoiceHints {
  * collide with turns started by the user (turn n = the user's n-th `user_text`).
  */
 export const PROACTIVE_TURN_BASE = 1_000_000;
+
+/** Parts of her body the user can stroke with the cursor (or a finger on touch screens). */
+export type TouchRegion =
+  | "head" | "ears" | "cheeks" | "face" | "hair" | "hands" | "arms" | "shoulders"
+  | "chest" | "belly" | "hips" | "legs" | "tail";
+export const TOUCH_REGIONS: readonly TouchRegion[] = ["head", "ears", "cheeks", "face", "hair", "hands", "arms", "shoulders", "chest", "belly", "hips", "legs", "tail"];
+/** Private areas: she reacts flustered and asks politely to stop (always wholesome). */
+export const SENSITIVE_REGIONS: readonly TouchRegion[] = ["chest", "belly", "hips", "legs", "tail"];
+
+/** Hand gestures recognised from the (opt-in) camera. */
+export type Gesture = "wave" | "thumbs_up" | "thumbs_down" | "victory" | "love" | "open_palm" | "fist" | "pointing_up";
+export const GESTURES: readonly Gesture[] = ["wave", "thumbs_up", "thumbs_down", "victory", "love", "open_palm", "fist", "pointing_up"];

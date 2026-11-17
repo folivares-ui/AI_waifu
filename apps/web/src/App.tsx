@@ -249,7 +249,7 @@ export function App() {
 
   return (
     <div className="app">
-      <AvatarStage emotion={emotion} speaking={speaking} listening={listening} getLevel={getLevel} />
+      <AvatarStage emotion={emotion} speaking={speaking} listening={listening} getLevel={getLevel} onTouch={(r) => soul.sendTouch(r)} />
       <div className="veil veil-top" aria-hidden="true" />
       <div className="veil veil-bottom" aria-hidden="true" />
 

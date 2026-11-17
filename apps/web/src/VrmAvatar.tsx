@@ -2,9 +2,10 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
-import type { Emotion } from "@waifu/core";
+import type { Emotion, TouchRegion } from "@waifu/core";
 import { addSpringChains, faceFraming, fullFraming, hideHelperMeshes, toonify } from "./avatarFixups";
 import { BoneFaceRig, CHANNEL_NAMES, RIG_POSES, type Channel } from "./boneFace";
+import { REACTIONS, StrokeTracker, TouchMap, envelope } from "./petting";
 
 export interface AvatarProps {
   emotion: Emotion;
@@ -12,6 +13,16 @@ export interface AvatarProps {
   listening: boolean;
   /** Live loudness 0..1 of her voice, for lip-sync. If absent while speaking, a flap is simulated. */
   getLevel?: () => number;
+  /** She was stroked on this body region with the cursor (fires once per stroke, at most every ~2.5 s per region). */
+  onTouch?: (region: TouchRegion) => void;
+}
+
+/** Floating hearts / sweat drops next to the cursor (rendered by AvatarStage). */
+export interface TouchFx {
+  x: number;
+  y: number;
+  glyph: string;
+  color: string;
 }
 
 /** Expression weights (VRM preset names) and gaze/head offsets per emotion. */
@@ -61,6 +72,27 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
     let springs: ReturnType<typeof addSpringChains>;
     const rigCur = Object.fromEntries(CHANNEL_NAMES.map((n) => [n, 0])) as Record<Channel, number>;
     let nextTwitch = 3;
+    // Petting
+    let touchMap: TouchMap | undefined;
+    const strokes = new StrokeTracker();
+    const pointer = { x: 0, y: 0, moved: 0, inside: false, lastMove: -1, lastFx: 0 };
+    let reaction: { region: TouchRegion; start: number; lastActive: number; side: number } | undefined;
+    const canvas = renderer.domElement;
+    canvas.style.touchAction = "none"; // strokes with a finger on touch screens
+    const onPointerMove = (e: PointerEvent) => {
+      const r = canvas.getBoundingClientRect();
+      const x = e.clientX - r.left;
+      const y = e.clientY - r.top;
+      if (pointer.inside) pointer.moved += Math.hypot(x - pointer.x, y - pointer.y);
+      Object.assign(pointer, { x, y, inside: true, lastMove: timer.getElapsed() });
+    };
+    const onPointerLeave = () => {
+      pointer.inside = false;
+      pointer.moved = 0;
+      canvas.style.cursor = "";
+    };
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerleave", onPointerLeave);
     let twitchT = -1;
     let twitchSide: Channel = "earTwitchL";
 
@@ -92,6 +124,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         const hidden = hideHelperMeshes(v);
         const tooned = toonify(v);
         rig = BoneFaceRig.detect(v); // must run in the rest pose
+        touchMap = new TouchMap(v);
         springs = addSpringChains(v);
         if (hidden.length || tooned || rig || springs) {
           console.info(`[avatar] converted model: ${tooned} materials made toon, hidden: [${hidden.join(", ")}], face rig: ${rig ? [...rig.channels].join(",") : "none"}, hair springs: ${springs ? springs.joints.size : 0}`);
@@ -153,6 +186,11 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
           nextBlink = t + 2 + Math.random() * 3.5;
         }
       }
+      // Being petted: the reaction is layered on top of her current emotion while it lasts.
+      const re = reaction ? REACTIONS[reaction.region] : undefined;
+      const env = reaction ? envelope(t, reaction.start, reaction.lastActive) : 0;
+      if (reaction && env === 0 && t > reaction.start + 1) reaction = undefined;
+      if (re && env > 0) for (const [n, w] of Object.entries(re.expr)) target[n] = Math.max(target[n] ?? 0, w * env);
       for (const n of EXPR_NAMES) {
         const fast = n === "aa" || n === "oh" || n === "ih" || n === "blink";
         cur[n] = lerp(cur[n], target[n], Math.min(1, dt * (fast ? 22 : 6)));
@@ -161,6 +199,16 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
 
       if (rig) {
         const want: Partial<Record<Channel, number>> = { ...RIG_POSES[p.emotion] };
+        if (re && env > 0) {
+          // The touch reaction wins over the mood (smile vs frown would fight otherwise).
+          for (const c of CHANNEL_NAMES) if (want[c] && !(c in re.rig)) want[c] = (want[c] ?? 0) * (1 - env);
+          for (const [c, w] of Object.entries(re.rig)) want[c as Channel] = Math.max(want[c as Channel] ?? 0, (w ?? 0) * env);
+          if (re.earWiggle) {
+            const wob = (Math.sin(t * 26) + 1) / 2;
+            want.earTwitchL = wob * env;
+            want.earTwitchR = (1 - wob) * env;
+          }
+        }
         const add = (c: Channel, v: number) => (want[c] = Math.min(1, Math.max(want[c] ?? 0, 0) + v));
         // Visemes and blinking reuse the values computed above for standard models.
         want.mouthOpen = Math.max(want.mouthOpen ?? 0, Math.min(1, target.aa * 1.1 + target.oh * 0.9 + target.ih * 0.5));
@@ -169,7 +217,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         // Smiling eyes are already nearly shut: blink only the remaining gap.
         want.blink = Math.max(want.blink ?? 0, target.blink * (1 - 0.85 * (want.eyeSmile ?? 0)));
         // Ears flick now and then, like the real animal's.
-        if (rig.channels.has("earTwitchL")) {
+        if (rig.channels.has("earTwitchL") && !re?.earWiggle) {
           if (twitchT < 0 && t > nextTwitch) {
             twitchT = 0;
             twitchSide = Math.random() < 0.5 ? "earTwitchL" : "earTwitchR";
@@ -193,23 +241,77 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
       }
 
       // Gaze + idle body motion
-      gaze.position.x = lerp(gaze.position.x, pose.look[0], dt * 4);
-      gaze.position.y = lerp(gaze.position.y, (vrm.humanoid.getNormalizedBoneNode("head")?.getWorldPosition(new THREE.Vector3()).y ?? 1.4) + 0.08 + pose.look[1], dt * 4);
+      const headY = vrm.humanoid.getNormalizedBoneNode("head")?.getWorldPosition(new THREE.Vector3()).y ?? 1.4;
+      let lookX = pose.look[0];
+      let lookY = headY + 0.08 + pose.look[1];
+      if (re && env > 0 && reaction) {
+        if (re.lookAtHand && pointer.inside) {
+          // eyes follow the hand: a point in front of her under the cursor
+          const ndc = new THREE.Vector3((pointer.x / canvas.clientWidth) * 2 - 1, -(pointer.y / canvas.clientHeight) * 2 + 1, 0.5).unproject(camera);
+          const dir = ndc.sub(camera.position).normalize();
+          const hit = camera.position.clone().add(dir.multiplyScalar((0.4 - camera.position.z) / dir.z));
+          lookX = hit.x;
+          lookY = hit.y;
+        } else if (re.shrink) {
+          lookX = -0.3 * reaction.side; // looks away, embarrassed
+          lookY = headY - 0.15;
+        } else if (reaction.region === "head") lookY = headY + 0.3; // looks up at the hand on her head
+      }
+      gaze.position.x = lerp(gaze.position.x, lookX, dt * 4);
+      gaze.position.y = lerp(gaze.position.y, lookY, dt * 4);
       const head = vrm.humanoid.getNormalizedBoneNode("head");
       if (head) {
         const nod = p.speaking ? Math.sin(t * 3.2) * 0.025 : 0;
-        head.rotation.x = lerp(head.rotation.x, Math.sin(t * 0.9) * 0.02 + nod + (p.listening ? 0.03 : 0), dt * 5);
-        head.rotation.y = lerp(head.rotation.y, Math.sin(t * 0.55) * 0.05, dt * 3);
-        head.rotation.z = lerp(head.rotation.z, pose.tilt + (p.listening ? 0.03 : 0), dt * 3);
+        const k = re && reaction ? env : 0;
+        const side = reaction?.side ?? 0;
+        // VRM 0.x normalized bones are mirrored (see the arm pose), so the roll towards the hand flips with it.
+        const mirror = vrm.meta.metaVersion === "0" ? -1 : 1;
+        head.rotation.x = lerp(head.rotation.x, Math.sin(t * 0.9) * 0.02 + nod + (p.listening ? 0.03 : 0) + (re?.pitch ?? 0) * k, dt * 5);
+        head.rotation.y = lerp(head.rotation.y, Math.sin(t * 0.55) * 0.05 + (re?.shrink ? 0.3 * side * mirror * k : 0), dt * 3);
+        head.rotation.z = lerp(head.rotation.z, pose.tilt + (p.listening ? 0.03 : 0) - (re?.tiltToward ?? 0) * side * mirror * k, dt * 3);
       }
       const spine = vrm.humanoid.getNormalizedBoneNode("spine");
-      if (spine) spine.rotation.x = Math.sin(t * 1.5) * 0.012;
+      const shrinkK = re?.shrink && reaction ? env : 0;
+      if (spine) {
+        spine.rotation.x = lerp(spine.rotation.x, Math.sin(t * 1.5) * 0.012 - 0.16 * shrinkK, dt * 6); // steps back
+        spine.rotation.y = lerp(spine.rotation.y, 0.32 * (reaction?.side ?? 1) * shrinkK, dt * 5); // turns away
+      }
       const chest = vrm.humanoid.getNormalizedBoneNode("chest");
       if (chest) chest.rotation.x = Math.sin(t * 1.5 + 0.4) * 0.01;
 
       vrm.update(dt);
       springs?.update(dt);
       renderer.render(scene, camera);
+
+      // Petting: only while the cursor moves over HER (opaque pixel), never on the background.
+      strokes.decay(dt);
+      if (touchMap && pointer.inside && !CAPTURE_FACE && pointer.moved > 0) {
+        const gl = renderer.getContext();
+        const px = new Uint8Array(4);
+        const dpr = renderer.getPixelRatio();
+        gl.readPixels(Math.floor(pointer.x * dpr), Math.floor(canvas.height - pointer.y * dpr), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        const onHer = px[3] > 20;
+        canvas.style.cursor = onHer ? "grab" : "";
+        const region = onHer ? touchMap.classify(pointer.x, pointer.y, camera, canvas.clientWidth, canvas.clientHeight) : undefined;
+        if (import.meta.env.DEV) Object.assign(window, { __pet: { alpha: px[3], region, x: pointer.x, y: pointer.y } });
+        if (region) {
+          const headPx = new THREE.Vector3();
+          vrm.humanoid.getRawBoneNode("head" as never)?.getWorldPosition(headPx);
+          headPx.project(camera);
+          const side = (pointer.x / canvas.clientWidth) * 2 - 1 > headPx.x ? 1 : -1; // hand on her left/right
+          const fired = strokes.add(region, pointer.moved, t);
+          if (fired) {
+            reaction = { region, start: reaction?.region === region && envelope(t, reaction.start, reaction.lastActive) > 0 ? reaction.start : t, lastActive: t, side };
+            live.current.onTouch?.(region);
+          } else if (reaction?.region === region && strokes.active(region)) reaction.lastActive = t;
+          if (reaction?.region === region && t - pointer.lastFx > 0.35) {
+            pointer.lastFx = t;
+            const fx = REACTIONS[region].fx;
+            el.dispatchEvent(new CustomEvent<TouchFx>("waifu:touch-fx", { bubbles: true, detail: { x: pointer.x, y: pointer.y, glyph: fx.glyph, color: fx.color } }));
+          }
+        }
+        pointer.moved = 0;
+      }
     };
     tick();
 
@@ -237,6 +339,8 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
 
     return () => {
       window.removeEventListener("waifu:capture", onCapture);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerleave", onPointerLeave);
       disposed = true;
       cancelAnimationFrame(raf);
       ro.disconnect();

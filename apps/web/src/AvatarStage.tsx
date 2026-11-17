@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Avatar as SvgAvatar } from "./Avatar";
 import { serverBase } from "./net";
-import type { AvatarProps } from "./VrmAvatar";
+import type { AvatarProps, TouchFx } from "./VrmAvatar";
 
 // three.js is large: only load it when a VRM model is actually available.
 const VrmAvatar = lazy(() => import("./VrmAvatar").then((m) => ({ default: m.VrmAvatar })));
@@ -11,6 +11,7 @@ const isGlb = (b: ArrayBuffer) => new TextDecoder().decode(b.slice(0, 4)) === "g
 /** Shows the anime VRM model if present at /avatars/default.vrm (or loaded by the user), else the simple SVG face. */
 export function AvatarStage(props: AvatarProps) {
   const [model, setModel] = useState<ArrayBuffer | null>(null);
+  const [fx, setFx] = useState<(TouchFx & { id: number })[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -38,7 +39,21 @@ export function AvatarStage(props: AvatarProps) {
   };
 
   return (
-    <div className="stage" data-speaking={props.speaking}>
+    <div
+      className="stage"
+      data-speaking={props.speaking}
+      ref={(el) => {
+        if (!el || (el as HTMLDivElement & { __fx?: boolean }).__fx) return;
+        (el as HTMLDivElement & { __fx?: boolean }).__fx = true;
+        let n = 0;
+        el.addEventListener("waifu:touch-fx", (e) => {
+          const d = (e as CustomEvent<TouchFx>).detail;
+          const id = ++n;
+          setFx((list) => [...list.slice(-14), { ...d, id }]);
+          setTimeout(() => setFx((list) => list.filter((f) => f.id !== id)), 1200);
+        });
+      }}
+    >
       {model ? (
         <Suspense fallback={<div className="vrm" />}>
           <VrmAvatar data={model} {...props} />
@@ -46,6 +61,11 @@ export function AvatarStage(props: AvatarProps) {
       ) : (
         <SvgAvatar emotion={props.emotion} speaking={props.speaking} listening={props.listening} />
       )}
+      {fx.map((f) => (
+        <span key={f.id} className="touch-fx" aria-hidden="true" style={{ left: f.x, top: f.y, color: f.color, ["--drift" as string]: `${(f.id % 5) * 9 - 18}px` }}>
+          {f.glyph}
+        </span>
+      ))}
     </div>
   );
 }

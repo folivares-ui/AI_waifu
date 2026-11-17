@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PROACTIVE_TURN_BASE, type Capabilities, type ClientMessage, type Emotion, type ScreenImage, type ServerMessage, type VoiceHints, type NameConfig } from "@waifu/core";
+import { PROACTIVE_TURN_BASE, type Capabilities, type ClientMessage, type Emotion, type ScreenImage, type ServerMessage, type VoiceHints, type NameConfig, type TouchRegion, type Gesture } from "@waifu/core";
 import { b64ToBuffer, type Clip } from "./player";
 import { serverBase } from "./net";
 
@@ -138,6 +138,8 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
     sendScreenFrame: (requestId: string, image?: ScreenImage, error?: "not_sharing" | "failed") =>
       send({ type: "screen_frame", requestId, ...(image ? { image } : {}), ...(error ? { error } : {}) }),
     sendWatch: (image: ScreenImage) => send({ type: "screen_watch", image }),
+    sendTouch: (region: TouchRegion) => send({ type: "touch", region }),
+    sendGesture: (gesture: Gesture) => send({ type: "gesture", gesture }),
     approvals,
     answerApproval: (id: string, approved: boolean) => {
       const a = approvals.find((x) => x.id === id);

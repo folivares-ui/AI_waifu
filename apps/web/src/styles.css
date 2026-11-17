@@ -175,3 +175,11 @@ body.capture .vrm { width: 1024px; height: 1024px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Petting feedback */
+.touch-fx { position: absolute; z-index: 1; pointer-events: none; font-size: 22px; font-weight: 900; text-shadow: 0 0 10px currentColor; transform: translate(-50%, -50%); animation: floatfx 1.2s ease-out forwards; }
+@keyframes floatfx { from { opacity: 0; transform: translate(-50%, -30%) scale(.6); } 15% { opacity: 1; transform: translate(-50%, -60%) scale(1.15); } to { opacity: 0; transform: translate(calc(-50% + var(--drift, 0px)), -260%) scale(.9); } }
+/* let strokes reach the character through the empty parts of the overlays */
+.topbar, .bottom { pointer-events: none; }
+.topbar > *, .bottom > *, .log > * { pointer-events: auto; }
+.log { pointer-events: none; }

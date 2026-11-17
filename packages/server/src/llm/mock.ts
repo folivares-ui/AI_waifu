@@ -5,6 +5,28 @@ export class MockProvider implements LLMProvider {
   readonly name = "mock";
   readonly vision = true;
   async *stream(req: LLMRequest): AsyncIterable<string> {
+    // Demo reactions (no API key): petting and gestures, in Rice Shower's style.
+    const touch = asText(req.messages.at(-1)?.content ?? "").match(/^\[(Caricia con el cursor|Gesto con la mano ante la camara): ([^\]]+)\]/);
+    if (touch) {
+      const canned: Record<string, string> = {
+        cabeza: "[emotion:happy] E-ehehe... A Rice le gusta mucho, Onii-sama...",
+        orejas: "[emotion:surprised] ¡Hyaa! L-las orejas de Rice tienen cosquillas...",
+        mejillas: "[emotion:shy] U-um... Rice se pone toda roja, Onii-sama...",
+        cara: "[emotion:surprised] ¿Eh? ¿Rice tiene algo en la cara?",
+        pelo: "[emotion:happy] Rice se peino bien hoy... ¿le gusta, Onii-sama?",
+        manos: "[emotion:shy] La mano de Onii-sama es muy calida...",
+        brazos: "[emotion:surprised] ¿Sí, Onii-sama? ¿Rice puede ayudar en algo?",
+        hombros: "[emotion:surprised] ¿Sí, Onii-sama? ¿Rice puede ayudar en algo?",
+        "saludo con la mano": "[emotion:happy] ¡Hola, Onii-sama! Rice tambien le saluda.",
+        "pulgar arriba": "[emotion:happy] ¡Arigatou! Rice se esforzara aun mas.",
+        "pulgar abajo": "[emotion:sad] Gomen ne... Rice lo hara mejor la proxima vez.",
+        "signo de victoria (V)": "[emotion:happy] ¡Victoria! Ganbaru, Onii-sama.",
+        "te quiero (mano)": "[emotion:shy] O-Onii-sama... Rice tambien le quiere mucho...",
+        "palma abierta": "[emotion:neutral] Sí... Rice espera.",
+      };
+      yield canned[touch[2]] ?? "[emotion:shy] E-eh... Onii-sama, eso no... A Rice le da mucha verguenza...";
+      return;
+    }
     const lastMsg0 = req.messages.at(-1);
     const img0 = Array.isArray(lastMsg0?.content) ? lastMsg0!.content.find((b) => b.type === "image") : undefined;
     if (img0 && img0.type === "image" && !req.system.includes("Return ONLY a JSON array")) {
