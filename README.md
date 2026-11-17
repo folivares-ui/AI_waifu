@@ -110,6 +110,14 @@ npm run tts:test -w @waifu/server -- "Hola, soy tu companera"   # writes data/tt
 - VoiceStudio marks generated audio with an invisible watermark by default (configurable in its Privacy settings).
 - If it is not running, the server reports "cannot reach http://localhost:3900 ... is the voice server running?" and she falls back to the browser voice.
 
+### Rice Shower's voice
+Reference clips cut from the voice sample you provided live in `data/voices/rice-shower/` (git-ignored: they are someone else's recordings, keep them private). Only the clean narration part was used (mono, no music or effects); `rice-ref-2.wav` (7 s, the most expressive) is the recommended one, the others are alternatives. With VoiceStudio open:
+```bash
+npm run voice:create -- --file data/voices/rice-shower/rice-ref-2.wav --name "Rice Shower"
+TTS_PROVIDER=voicestudio STT_PROVIDER=voicestudio npm run dev:server
+```
+The soul already uses `"ttsVoice": "Rice Shower"`. The reference is Japanese; VoiceStudio uses it for the timbre and delivery while she speaks Spanish.
+
 This repo also includes VoiceStudio's own Claude Code skill (`.claude/skills/voicestudio`, AGPL-3.0, unmodified, see its NOTICE), so a Claude Code session in this project knows how to drive VoiceStudio's API (voices, cloning, transcription, MCP).
 
 ## Getting a natural voice and Whisper STT
