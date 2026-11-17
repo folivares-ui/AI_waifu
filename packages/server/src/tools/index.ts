@@ -4,6 +4,7 @@ import { loadCatalog } from "./catalog.js";
 import { createPublicApiTools, loadKeys } from "./public-apis.js";
 import { homedir } from "node:os";
 import { delimiter } from "node:path";
+import { createBlenderTools, createVSCodeTools } from "./apps.js";
 import { BrowserController, createBrowserTools } from "./browser.js";
 import { createFileTools } from "./files.js";
 import { createScreenTool } from "./screen.js";
@@ -26,7 +27,7 @@ export let browserForShutdown: BrowserController | undefined;
 export function createToolFactory(env: NodeJS.ProcessEnv = process.env): ((ctx: ToolContext) => Tool[]) | undefined {
   const enabled = (env.TOOLS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   if (enabled.length === 0) return undefined;
-  const KNOWN = ["public_apis", "screen", "files", "browser"];
+  const KNOWN = ["public_apis", "screen", "files", "browser", "vscode", "blender"];
   const unknown = enabled.filter((t) => !KNOWN.includes(t));
   if (unknown.length) throw new Error(`Unknown TOOLS entries: ${unknown.join(", ")} (known: ${KNOWN.join(", ")})`);
   let apis: { entries: import("./catalog.js").ApiEntry[]; keys: ReturnType<typeof loadKeys> } | undefined;
@@ -37,7 +38,7 @@ export function createToolFactory(env: NodeJS.ProcessEnv = process.env): ((ctx: 
     console.log(`[tools] public_apis enabled: ${catalog.entries.length} APIs, ${Object.keys(keys).length} host key(s) configured`);
   }
   let workspace: Workspace | undefined;
-  if (enabled.includes("files")) {
+  if (["files", "vscode", "blender"].some((t) => enabled.includes(t))) {
     // Folders she may read and edit. Default: Documents/AiWaifu in the user's home. Separate several with ";" on
     // Windows or ":" elsewhere.
     const dirs = (env.WORKSPACE_DIRS ?? resolve(homedir(), "Documents", "AiWaifu")).split(delimiter).map((d) => d.trim()).filter(Boolean);
@@ -62,5 +63,7 @@ export function createToolFactory(env: NodeJS.ProcessEnv = process.env): ((ctx: 
     ...(enabled.includes("screen") ? [createScreenTool(ctx)] : []),
     ...(workspace ? createFileTools(workspace) : []),
     ...(browser ? createBrowserTools(browser) : []),
+    ...(workspace && enabled.includes("vscode") ? createVSCodeTools(workspace) : []),
+    ...(workspace && enabled.includes("blender") ? createBlenderTools(workspace) : []),
   ];
 }
