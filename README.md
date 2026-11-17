@@ -96,6 +96,18 @@ npm run tts:test -w @waifu/server -- "Hola, soy tu companera"
 
 Set `soul.voice.ttsVoice` in your soul file for a per-character voice id.
 
+## Models without expressions (converted game models)
+Models converted from other formats (for example through Sketchfab) often arrive as VRM with a skeleton but **no expressions, realistic materials and no hair physics**. The avatar repairs what it can at load time, without modifying your file:
+- **Expressions from facial bones.** If the model has no blendshapes but has a facial bone rig named like `Eye_up_NN_L`, `Eye_bottom_NN_L`, `Eyebrow_NN_L`, `Mouth_L/R`, `Mouth_bottom_*`, `Chin`, `Ear_01_L/R`, the six emotions, blinking, lip movement and ear motion are built by moving those bones (`apps/web/src/boneFace.ts`). Offsets were tuned by eye on one model of that rig family; other rigs with the same names may need different values, and rigs with other names are not detected (the face then stays static).
+- **Anime shading.** PBR materials are replaced by toon (MToon) ones, with no shadows on face parts.
+- **Clean-up.** Exact duplicate meshes and the game's untextured face-shadow overlay are hidden.
+- **Hair/tail physics.** `Sp_*` bone chains for hair, tail and ribbons get simple spring physics (no colliders).
+- **Framing** adapts to tall hats or animal ears.
+
+The browser console prints an `[avatar] converted model: ...` line listing what was applied. Proper VRM models are left untouched.
+
+Check the license of any model you use: a "CC-BY" tag on a fan upload of a commercial game's character does not necessarily cover the character itself. Keep such models for personal use (the `avatars/` folder is git-ignored, so they are never pushed).
+
 ## Icons from your character
 The app icons (PWA, desktop) are the face of the current avatar. After changing the model, regenerate them (needs Playwright + Chromium; the web app must be running):
 ```bash

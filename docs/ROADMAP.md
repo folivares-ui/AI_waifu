@@ -9,6 +9,7 @@ Voice chat, avatar, soul file, memory, swappable LLM.
 - [x] Server-side STT/TTS behind provider interfaces (OpenAI-style endpoints, local command). Verified against fakes only.
 - [x] VAD + echo-aware barge-in (energy VAD; a neural Silero VAD is a possible upgrade).
 - [x] VRM anime avatar with expressions and audio-driven lip-sync.
+- [x] Bone-driven expressions, toon conversion and hair springs for converted models without blendshapes (one rig family).
 - [ ] Phoneme-accurate visemes (currently loudness-driven mouth shapes).
 - [ ] Streaming TTS (play audio before the sentence finishes synthesizing) for lower latency.
 - [ ] Memory v2: embeddings, summarisation of old conversations, forgetting/editing UI.

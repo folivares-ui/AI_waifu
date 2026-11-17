@@ -3,6 +3,8 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 import type { Emotion } from "@waifu/core";
+import { addSpringChains, bustFraming, hideHelperMeshes, toonify } from "./avatarFixups";
+import { BoneFaceRig, CHANNEL_NAMES, RIG_POSES, type Channel } from "./boneFace";
 
 export interface AvatarProps {
   emotion: Emotion;
@@ -54,6 +56,13 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
     const cur: Record<string, number> = Object.fromEntries(EXPR_NAMES.map((n) => [n, 0]));
     let nextBlink = 1.5;
     let blinkT = -1;
+    // Models without expressions but with facial bones are animated through this rig instead.
+    let rig: BoneFaceRig | undefined;
+    let springs: ReturnType<typeof addSpringChains>;
+    const rigCur = Object.fromEntries(CHANNEL_NAMES.map((n) => [n, 0])) as Record<Channel, number>;
+    let nextTwitch = 3;
+    let twitchT = -1;
+    let twitchSide: Channel = "earTwitchL";
 
     const resize = () => {
       const w = el.clientWidth || 300;
@@ -77,7 +86,16 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         VRMUtils.combineSkeletons(gltf.scene);
         VRMUtils.rotateVRM0(v); // no-op for VRM 1.0, turns VRM 0.x models to face the camera
         scene.add(v.scene);
+        // Repairs for models converted from other formats (no-ops for proper VRM models).
+        const hidden = hideHelperMeshes(v);
+        const tooned = toonify(v);
+        rig = BoneFaceRig.detect(v); // must run in the rest pose
+        springs = addSpringChains(v);
+        if (hidden.length || tooned || rig || springs) {
+          console.info(`[avatar] converted model: ${tooned} materials made toon, hidden: [${hidden.join(", ")}], face rig: ${rig ? [...rig.channels].join(",") : "none"}, hair springs: ${springs ? springs.joints.size : 0}`);
+        }
         vrm = v;
+        if (import.meta.env.DEV) Object.assign(window, { __vrm: v, __THREE: THREE, __camera: camera }); // for rig experiments
         // Relaxed pose instead of the default T-pose.
         const bone = (n: string) => v.humanoid.getNormalizedBoneNode(n as never);
         const set = (n: string, x: number, y: number, z: number) => bone(n)?.rotation.set(x, y, z);
@@ -94,8 +112,9 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
           camera.position.set(0, head.y + 0.045, 1.15);
           camera.lookAt(0, head.y + 0.045, 0);
         } else {
-          camera.position.set(0, head.y - 0.05, 1.6);
-          camera.lookAt(0, head.y - 0.07, 0);
+          const f = bustFraming(v, head.y, camera.fov); // also fits tall hats / animal ears
+          camera.position.set(0, f.camY, f.dist);
+          camera.lookAt(0, f.lookY, 0);
         }
         gaze.position.set(0, head.y + 0.08, 1.6);
         if (v.lookAt) v.lookAt.target = gaze;
@@ -140,6 +159,36 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         vrm.expressionManager?.setValue(n, cur[n]);
       }
 
+      if (rig) {
+        const want: Partial<Record<Channel, number>> = { ...RIG_POSES[p.emotion] };
+        const add = (c: Channel, v: number) => (want[c] = Math.min(1, Math.max(want[c] ?? 0, 0) + v));
+        // Visemes and blinking reuse the values computed above for standard models.
+        want.mouthOpen = Math.max(want.mouthOpen ?? 0, Math.min(1, target.aa * 1.1 + target.oh * 0.9 + target.ih * 0.5));
+        add("mouthNarrow", target.oh * 0.9);
+        add("mouthWide", target.ih);
+        want.blink = Math.max(want.blink ?? 0, target.blink);
+        // Ears flick now and then, like the real animal's.
+        if (rig.channels.has("earTwitchL")) {
+          if (twitchT < 0 && t > nextTwitch) {
+            twitchT = 0;
+            twitchSide = Math.random() < 0.5 ? "earTwitchL" : "earTwitchR";
+          }
+          if (twitchT >= 0) {
+            twitchT += dt;
+            want[twitchSide] = Math.sin(Math.min(1, twitchT / 0.28) * Math.PI);
+            if (twitchT > 0.28) {
+              twitchT = -1;
+              nextTwitch = t + 3 + Math.random() * 6;
+            }
+          }
+        }
+        for (const c of CHANNEL_NAMES) {
+          const fast = c === "blink" || c.startsWith("mouth") || c.startsWith("earTwitch");
+          rigCur[c] = lerp(rigCur[c], want[c] ?? 0, Math.min(1, dt * (fast ? 22 : 6)));
+        }
+        rig.apply(rigCur);
+      }
+
       // Gaze + idle body motion
       gaze.position.x = lerp(gaze.position.x, pose.look[0], dt * 4);
       gaze.position.y = lerp(gaze.position.y, (vrm.humanoid.getNormalizedBoneNode("head")?.getWorldPosition(new THREE.Vector3()).y ?? 1.4) + 0.08 + pose.look[1], dt * 4);
@@ -156,6 +205,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
       if (chest) chest.rotation.x = Math.sin(t * 1.5 + 0.4) * 0.01;
 
       vrm.update(dt);
+      springs?.update(dt);
       renderer.render(scene, camera);
     };
     tick();

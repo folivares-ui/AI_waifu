@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -p . && vite build",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",
@@ -14,7 +15,8 @@
     "@types/three": "^0.187.0",
     "@vitejs/plugin-react": "^6.2.1",
     "typescript": "^7.0.2",
-    "vite": "^8.3.6"
+    "vite": "^8.3.6",
+    "vitest": "^5.1.0"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.5.5",

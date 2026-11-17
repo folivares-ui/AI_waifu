@@ -1,0 +1,115 @@
+import * as THREE from "three";
+import { MToonMaterial, VRMSpringBoneJoint, VRMSpringBoneManager, type VRM } from "@pixiv/three-vrm";
+
+/**
+ * Repairs for models that were not authored as VRM (e.g. game models converted through a generic exporter):
+ * they arrive with realistic PBR materials, duplicated meshes, helper meshes and no hair physics.
+ * Proper VRM models (MToon materials, spring bones) are left untouched.
+ */
+
+const FLAT_SHADED = /face|eye|mayu|brow|lash|cheek|mouth|tooth|teeth|tongue/i; // parts that must not get shadows
+
+/** Replaces PBR materials with anime-style toon materials. Returns how many were converted. */
+export function toonify(vrm: VRM): number {
+  let converted = 0;
+  const cache = new Map<THREE.Material, THREE.Material>();
+  vrm.scene.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const convert = (m: THREE.Material): THREE.Material => {
+      const std = m as THREE.MeshStandardMaterial;
+      if (!std.isMeshStandardMaterial) return m;
+      let out = cache.get(m);
+      if (!out) {
+        const flat = FLAT_SHADED.test(m.name);
+        const toon = new MToonMaterial({
+          ...(std.map ? { map: std.map, shadeMultiplyTexture: std.map } : {}), // shadows = the texture itself, tinted
+          color: std.color,
+          shadeColorFactor: flat ? new THREE.Color(1, 1, 1) : new THREE.Color(0.8, 0.74, 0.84),
+          shadingToonyFactor: 0.9,
+          shadingShiftFactor: flat ? 0 : -0.05,
+          giEqualizationFactor: 0.9,
+          transparent: std.transparent,
+          alphaTest: std.alphaTest,
+          side: std.side,
+        });
+        toon.name = m.name;
+        out = toon;
+        cache.set(m, out);
+        converted++;
+      }
+      return out;
+    };
+    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(convert) : convert(mesh.material);
+  });
+  for (const old of cache.keys()) old.dispose();
+  return converted;
+}
+
+/**
+ * Hides meshes that only make sense inside the original game:
+ *  - exact duplicates (same vertex count + same texture), which otherwise z-fight;
+ *  - small untextured overlays in an otherwise fully textured model (the game's multiply-blended face shadow,
+ *    which a generic renderer draws as an opaque grey patch).
+ */
+export function hideHelperMeshes(vrm: VRM): string[] {
+  const meshes: THREE.Mesh[] = [];
+  vrm.scene.traverse((o) => (o as THREE.Mesh).isMesh && meshes.push(o as THREE.Mesh));
+  const mapOf = (m: THREE.Mesh) => ((Array.isArray(m.material) ? m.material[0] : m.material) as THREE.MeshStandardMaterial).map ?? null;
+  const textured = meshes.filter((m) => mapOf(m)).length;
+  const seen = new Set<string>();
+  const hidden: string[] = [];
+  for (const m of meshes) {
+    const map = mapOf(m);
+    const verts = m.geometry.getAttribute("position")?.count ?? 0;
+    const matName = (Array.isArray(m.material) ? m.material[0] : m.material).name;
+    if (!map && textured >= meshes.length - 2 && verts < 500) {
+      m.visible = false;
+      hidden.push(`${matName} (untextured overlay)`);
+      continue;
+    }
+    const key = `${verts}:${map?.uuid ?? "none"}`;
+    if (map && verts > 1000 && seen.has(key)) {
+      m.visible = false;
+      hidden.push(`${matName} (duplicate)`);
+    }
+    seen.add(key);
+  }
+  return hidden;
+}
+
+const SPRING_CHAIN = /^Sp_(He_Hair|Hi_Tail|He_Acc|Hi_Ribbon|So_Collar)\w*_\d\d(_\d{3,4})?$/; // hair, tail, ribbons
+const CHAIN_LINK = /^Sp_\w+_\d\d(_\d{3,4})?$/;
+
+/**
+ * Adds simple spring physics to "Sp_*" bone chains (hair, tail, ribbons) on models that have such chains but no
+ * VRM spring-bone data. No colliders, so settings are stiff to keep hair from sinking into the body.
+ * Returns undefined when the model already has springs or has no such chains.
+ */
+export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
+  if (vrm.springBoneManager && vrm.springBoneManager.joints.size > 0) return undefined;
+  const mgr = new VRMSpringBoneManager();
+  let count = 0;
+  vrm.scene.traverse((o) => {
+    if (!SPRING_CHAIN.test(o.name)) return;
+    const next = o.children.find((c) => CHAIN_LINK.test(c.name)) ?? o.children.find((c) => /_end(_\d+)?$/.test(c.name)) ?? null;
+    const isTail = /Tail/.test(o.name);
+    mgr.addJoint(new VRMSpringBoneJoint(o, next, { stiffness: isTail ? 0.9 : 1.6, dragForce: 0.55, gravityPower: isTail ? 0.06 : 0.02, gravityDir: new THREE.Vector3(0, -1, 0), hitRadius: 0.01 }));
+    count++;
+  });
+  if (count === 0) return undefined;
+  mgr.setInitState();
+  return mgr;
+}
+
+/** Bust framing that also fits tall hats / animal ears. Returns camera y, look-at y and distance. */
+export function bustFraming(vrm: VRM, headY: number, fovDeg: number): { camY: number; lookY: number; dist: number } {
+  const top = new THREE.Box3().setFromObject(vrm.scene).max.y;
+  const classic = { camY: headY - 0.05, lookY: headY - 0.07, dist: 1.6 };
+  if (!Number.isFinite(top) || top - headY < 0.3) return classic; // ordinary head: keep the tuned framing
+  const hi = top + 0.03;
+  const lo = headY - 0.36;
+  const dist = (hi - lo) / 2 / Math.tan(THREE.MathUtils.degToRad(fovDeg / 2));
+  const mid = (hi + lo) / 2;
+  return { camY: mid, lookY: mid, dist: Math.max(1.6, dist) };
+}
