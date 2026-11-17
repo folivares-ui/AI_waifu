@@ -1,3 +1,5 @@
+import { reachError } from "../tts/index.js";
+
 export interface STTProvider {
   readonly name: string;
   transcribe(audio: Buffer, mime: string, opts: { lang?: string }, signal?: AbortSignal): Promise<string>;
@@ -8,19 +10,24 @@ export interface STTProvider {
  * Works with OpenAI or any local Whisper server that implements the same endpoint.
  */
 export class OpenAICompatibleSTT implements STTProvider {
-  readonly name = "openai-compatible";
-  constructor(private o: { baseUrl: string; apiKey?: string; model: string }) {}
+  readonly name: string;
+  constructor(private o: { baseUrl: string; apiKey?: string; model: string; name?: string }) {
+    this.name = o.name ?? "openai-compatible";
+  }
 
   async transcribe(audio: Buffer, mime: string, opts: { lang?: string }, signal?: AbortSignal): Promise<string> {
     const form = new FormData();
     form.append("file", new Blob([new Uint8Array(audio)], { type: mime }), mime.includes("wav") ? "audio.wav" : "audio.webm");
     form.append("model", this.o.model);
     if (opts.lang) form.append("language", opts.lang.slice(0, 2)); // ISO-639-1
-    const res = await fetch(`${this.o.baseUrl.replace(/\/$/, "")}/audio/transcriptions`, {
+    const url = `${this.o.baseUrl.replace(/\/$/, "")}/audio/transcriptions`;
+    const res = await fetch(url, {
       method: "POST",
       signal,
       headers: this.o.apiKey ? { authorization: `Bearer ${this.o.apiKey}` } : {},
       body: form,
+    }).catch((e) => {
+      throw signal?.aborted ? e : reachError(url, e);
     });
     if (!res.ok) throw new Error(`STT ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const json = (await res.json()) as { text?: string };
@@ -39,7 +46,15 @@ export function createSTT(env: NodeJS.ProcessEnv = process.env): STTProvider | u
         apiKey: env.STT_API_KEY,
         model: env.STT_MODEL ?? "whisper-1",
       });
+    case "voicestudio":
+      // VoiceStudio's OpenAI-compatible transcription on this machine ("whisper-1" = its active speech-to-text engine).
+      return new OpenAICompatibleSTT({
+        name: "voicestudio",
+        baseUrl: env.STT_BASE_URL ?? "http://localhost:3900/v1",
+        apiKey: env.STT_API_KEY,
+        model: env.STT_MODEL ?? "whisper-1",
+      });
     default:
-      throw new Error(`Unknown STT_PROVIDER "${kind}" (use none | openai)`);
+      throw new Error(`Unknown STT_PROVIDER "${kind}" (use none | voicestudio | openai)`);
   }
 }

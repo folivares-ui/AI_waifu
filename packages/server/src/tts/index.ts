@@ -3,6 +3,12 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+/** Turns Node's bare "fetch failed" into something a person can act on. */
+export function reachError(url: string, e: unknown): Error {
+  const code = (e as { cause?: { code?: string } })?.cause?.code;
+  return new Error(`cannot reach ${new URL(url).origin}${code ? ` (${code})` : ""}: is the voice server (e.g. VoiceStudio) running?`);
+}
+
 export interface TTSOptions {
   voice?: string;
   lang?: string;
@@ -21,21 +27,52 @@ export interface TTSProvider {
  * (OpenAI itself, or local servers that copy that API). Quality = whatever engine is behind it.
  */
 export class OpenAICompatibleTTS implements TTSProvider {
-  readonly name = "openai-compatible";
+  readonly name: string;
   constructor(
-    private o: { baseUrl: string; apiKey?: string; model: string; voice: string; format: "mp3" | "wav" | "opus" | "flac" },
-  ) {}
+    private o: {
+      baseUrl: string;
+      apiKey?: string;
+      model: string;
+      voice: string;
+      format: "mp3" | "wav" | "opus" | "flac";
+      /**
+       * Extra `language` field (ISO 639-1). Not part of OpenAI's spec, but servers such as VoiceStudio accept it.
+       * "auto" = the soul's language; a code = that language; undefined = not sent.
+       */
+      language?: string;
+      /** Optional voice-style instructions (`instructions` field), e.g. "warm, shy, soft-spoken". */
+      instructions?: string;
+      name?: string;
+    },
+  ) {
+    this.name = o.name ?? "openai-compatible";
+  }
 
   async synthesize(text: string, opts: TTSOptions, signal?: AbortSignal): Promise<TTSResult> {
-    const res = await fetch(`${this.o.baseUrl.replace(/\/$/, "")}/audio/speech`, {
+    const url = `${this.o.baseUrl.replace(/\/$/, "")}/audio/speech`;
+    const res = await fetch(url, {
       method: "POST",
       signal,
       headers: { "content-type": "application/json", ...(this.o.apiKey ? { authorization: `Bearer ${this.o.apiKey}` } : {}) },
-      body: JSON.stringify({ model: this.o.model, voice: opts.voice ?? this.o.voice, input: text, response_format: this.o.format }),
+      body: JSON.stringify({
+        model: this.o.model,
+        voice: opts.voice ?? this.o.voice,
+        input: text,
+        response_format: this.o.format,
+        ...(this.language(opts) ? { language: this.language(opts) } : {}),
+        ...(this.o.instructions ? { instructions: this.o.instructions } : {}),
+      }),
+    }).catch((e) => {
+      throw signal?.aborted ? e : reachError(url, e);
     });
     if (!res.ok) throw new Error(`TTS ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const mimes = { mp3: "audio/mpeg", wav: "audio/wav", opus: "audio/ogg", flac: "audio/flac" } as const;
     return { audio: Buffer.from(await res.arrayBuffer()), mime: mimes[this.o.format] };
+  }
+
+  private language(opts: TTSOptions): string | undefined {
+    if (!this.o.language) return undefined;
+    return (this.o.language === "auto" ? opts.lang : this.o.language)?.slice(0, 2).toLowerCase() || undefined;
   }
 }
 
@@ -118,6 +155,22 @@ export function createTTS(env: NodeJS.ProcessEnv = process.env): TTSProvider | u
         model: env.TTS_MODEL ?? "tts-1",
         voice: env.TTS_VOICE ?? "alloy",
         format: (env.TTS_FORMAT as "mp3") ?? "mp3",
+        language: env.TTS_LANGUAGE,
+        instructions: env.TTS_INSTRUCTIONS,
+      });
+    case "voicestudio":
+      // VoiceStudio (https://github.com/debpalash/VoiceStudio) running on this machine: its OpenAI-compatible API.
+      // Loopback calls need no key; "tts-1" is an alias for its active engine; "default" = its default voice
+      // (set TTS_VOICE or soul.voice.ttsVoice to a saved VoiceStudio voice profile ID or name).
+      return new OpenAICompatibleTTS({
+        name: "voicestudio",
+        baseUrl: env.TTS_BASE_URL ?? "http://localhost:3900/v1",
+        apiKey: env.TTS_API_KEY,
+        model: env.TTS_MODEL ?? "tts-1",
+        voice: env.TTS_VOICE ?? "default",
+        format: (env.TTS_FORMAT as "wav") ?? "wav",
+        language: env.TTS_LANGUAGE ?? "auto",
+        instructions: env.TTS_INSTRUCTIONS,
       });
     case "elevenlabs":
       if (!env.TTS_API_KEY) throw new Error("TTS_PROVIDER=elevenlabs requires TTS_API_KEY");
@@ -132,6 +185,6 @@ export function createTTS(env: NodeJS.ProcessEnv = process.env): TTSProvider | u
       if (!env.TTS_COMMAND) throw new Error("TTS_PROVIDER=command requires TTS_COMMAND");
       return new CommandTTS(env.TTS_COMMAND);
     default:
-      throw new Error(`Unknown TTS_PROVIDER "${kind}" (use none | openai | elevenlabs | command)`);
+      throw new Error(`Unknown TTS_PROVIDER "${kind}" (use none | voicestudio | openai | elevenlabs | command)`);
   }
 }

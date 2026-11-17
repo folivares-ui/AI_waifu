@@ -9,8 +9,8 @@ import type { LLMProvider, LLMRequest } from "./llm/index.js";
 import { MemoryStore } from "./memory.js";
 import { Session } from "./session.js";
 import type { Soul } from "./soul.js";
-import { OpenAICompatibleSTT } from "./stt/index.js";
-import { CommandTTS, ElevenLabsTTS, OpenAICompatibleTTS, splitCommand, type TTSProvider } from "./tts/index.js";
+import { OpenAICompatibleSTT, createSTT } from "./stt/index.js";
+import { CommandTTS, ElevenLabsTTS, OpenAICompatibleTTS, createTTS, splitCommand, type TTSProvider } from "./tts/index.js";
 
 const servers: Server[] = [];
 const listen = (h: Parameters<typeof createServer>[1]) =>
@@ -62,6 +62,43 @@ describe("ElevenLabsTTS", () => {
   it("requires a voice id", async () => {
     const tts = new ElevenLabsTTS({ apiKey: "k", model: "m", baseUrl: "http://127.0.0.1:1", outputFormat: "x" });
     await expect(tts.synthesize("x", {})).rejects.toThrow(/voice id/);
+  });
+});
+
+describe("VoiceStudio presets", () => {
+  it("TTS sends the soul's language, wav and the default voice; generic OpenAI does not send language", async () => {
+    const bodies: any[] = [];
+    const urls: string[] = [];
+    const base = await listen(async (req, res) => {
+      let b = "";
+      for await (const c of req) b += c;
+      urls.push(String(req.url));
+      bodies.push(JSON.parse(b));
+      res.writeHead(200, { "content-type": "audio/wav" }).end(Buffer.from("RIFF"));
+    });
+    const vs = createTTS({ TTS_PROVIDER: "voicestudio", TTS_BASE_URL: `${base}/v1`, TTS_INSTRUCTIONS: "suave y timida" })!;
+    expect(vs.name).toBe("voicestudio");
+    const out = await vs.synthesize("hola", { lang: "es-ES" });
+    expect(out.mime).toBe("audio/wav");
+    expect(urls[0]).toBe("/v1/audio/speech");
+    // exactly the fields of VoiceStudio's SpeechRequest that we rely on
+    expect(bodies[0]).toEqual({ model: "tts-1", voice: "default", input: "hola", response_format: "wav", language: "es", instructions: "suave y timida" });
+    await vs.synthesize("hola", { lang: "es-ES", voice: "Rice" }); // soul.voice.ttsVoice wins
+    expect(bodies[1].voice).toBe("Rice");
+    await createTTS({ TTS_PROVIDER: "openai", TTS_BASE_URL: base })!.synthesize("hi", { lang: "es-ES" });
+    expect(bodies[2]).not.toHaveProperty("language");
+    expect(bodies[2]).not.toHaveProperty("instructions");
+  });
+  it("explains clearly when VoiceStudio is not running", async () => {
+    const tts = createTTS({ TTS_PROVIDER: "voicestudio", TTS_BASE_URL: "http://127.0.0.1:1/v1" })!;
+    await expect(tts.synthesize("x", {})).rejects.toThrow(/cannot reach http:\/\/127\.0\.0\.1:1.*VoiceStudio/);
+    const stt = createSTT({ STT_PROVIDER: "voicestudio", STT_BASE_URL: "http://127.0.0.1:1/v1" })!;
+    await expect(stt.transcribe(Buffer.from("RIFF"), "audio/wav", {})).rejects.toThrow(/cannot reach.*running/);
+  });
+  it("STT preset targets VoiceStudio's endpoint and defaults", () => {
+    const stt = createSTT({ STT_PROVIDER: "voicestudio" })!;
+    expect(stt.name).toBe("voicestudio");
+    expect((stt as any).o).toMatchObject({ baseUrl: "http://localhost:3900/v1", model: "whisper-1" });
   });
 });
 

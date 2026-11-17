@@ -81,6 +81,20 @@ About half the catalog needs no key. For the rest, put keys in `data/api-keys.js
 
 Safety design (all covered by tests): off unless `TOOLS` is set; GET only, https only; the server refuses private/loopback/link-local addresses (checked at connect time, so DNS tricks and redirects cannot bypass it); the model can only call hosts from the catalog or named in documentation it read, which blocks a prompt-injected "send her memories to attacker.com"; responses are size/time limited and wrapped as untrusted data; max 4 tool rounds / 8 calls per turn. APIs are third parties: check each one's terms and rate limits.
 
+## Local voice with VoiceStudio (free, private)
+[VoiceStudio](https://github.com/debpalash/VoiceStudio) (AGPL-3.0, separate app) runs text-to-speech, voice cloning/design and transcription on your own computer and exposes an OpenAI-compatible API on `http://localhost:3900`. Install and open it (Windows, macOS, Linux; GPU recommended, CPU works but slower), make sure its models are installed, then:
+```bash
+TTS_PROVIDER=voicestudio STT_PROVIDER=voicestudio npm run dev:server
+npm run tts:test -w @waifu/server -- "Hola, soy tu companera"   # writes data/tts-test.wav to listen to
+```
+- To give her a specific voice, create or clone one in VoiceStudio and set `TTS_VOICE=<profile ID or name>` (or `voice.ttsVoice` in the soul file). Only clone voices you are authorized to use.
+- The soul's language is sent automatically (`language`), and `TTS_INSTRUCTIONS` can describe a speaking style.
+- Latency matters for conversation: the first generation after starting VoiceStudio is slow (models load); judge from the second one. On CPU-only machines replies will lag.
+- VoiceStudio marks generated audio with an invisible watermark by default (configurable in its Privacy settings).
+- If it is not running, the server reports "cannot reach http://localhost:3900 ... is the voice server running?" and she falls back to the browser voice.
+
+This repo also includes VoiceStudio's own Claude Code skill (`.claude/skills/voicestudio`, AGPL-3.0, unmodified, see its NOTICE), so a Claude Code session in this project knows how to drive VoiceStudio's API (voices, cloning, transcription, MCP).
+
 ## Getting a natural voice and Whisper STT
 
 The voice is only as natural as the TTS engine you plug in; the browser's built-in voices sound robotic. Configure in `.env`:
