@@ -1,6 +1,8 @@
 //! Desktop shell: starts (or reuses) the local soul server, shows its web UI in a native window and adds a
 //! global push-to-talk shortcut. All the actual logic stays in the server and the web app.
 
+mod control;
+
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -39,7 +41,7 @@ fn find_root() -> Option<PathBuf> {
     None
 }
 
-fn spawn_server(root: &PathBuf) -> std::io::Result<Child> {
+fn spawn_server(root: &PathBuf, control: Option<&control::ControlInfo>) -> std::io::Result<Child> {
     // `node --import tsx` runs the TypeScript server directly (the same thing `npm run start` does),
     // and lets us kill the actual server process on exit instead of an npm wrapper.
     let mut cmd = Command::new(std::env::var("WAIFU_NODE").unwrap_or_else(|_| "node".into()));
@@ -48,6 +50,10 @@ fn spawn_server(root: &PathBuf) -> std::io::Result<Child> {
         // The server exits by itself if this process disappears (crash, force quit), so it is never orphaned.
         .env("WAIFU_PARENT_PID", std::process::id().to_string())
         .stdin(Stdio::null());
+    // Screen/mouse/keyboard endpoint for her "desktop" tools (every action still needs the user's approval).
+    if let Some(c) = control {
+        cmd.env("WAIFU_DESKTOP_URL", &c.url).env("WAIFU_DESKTOP_TOKEN", &c.token);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -112,7 +118,14 @@ pub fn run() {
                             if !root.join("apps").join("web").join("dist").join("index.html").exists() {
                                 return show_error(&handle, "Falta compilar la web: ejecuta 'npm run build' en la carpeta del proyecto.");
                             }
-                            match spawn_server(&root) {
+                            let control = match control::start() {
+                                Ok(c) => Some(c),
+                                Err(e) => {
+                                    eprintln!("desktop control unavailable: {e}");
+                                    None
+                                }
+                            };
+                            match spawn_server(&root, control.as_ref()) {
                                 Ok(child) => *handle.state::<ServerProc>().0.lock().unwrap() = Some(child),
                                 Err(e) => return show_error(&handle, &format!("No pude iniciar el servidor (esta Node.js instalado?): {e}")),
                             }

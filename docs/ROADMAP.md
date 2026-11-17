@@ -30,14 +30,15 @@ Voice chat, avatar, soul file, memory, swappable LLM.
 - [ ] Native OS capture in the desktop shell (system webviews may lack getDisplayMedia), with a monitor/window chooser.
 - [ ] Redaction of sensitive regions before sending; per-app allowlist.
 
-## Phase 5 — Acting on your computer
-A tool layer with per-app adapters, all behind the security principles in ARCHITECTURE.md:
-- Generic fallback: screenshot + mouse/keyboard ("computer use"). Slow and fragile; best for apps without an API.
-- Microsoft Word/Excel/PowerPoint: COM automation on Windows, AppleScript/JXA on macOS (?), or editing the files directly with libraries.
-- VS Code: an extension exposing editor/terminal actions. Blender: Python (`bpy`) add-on. Autodesk Inventor: its COM API (Windows). Canva: its official API/connector.
-- PDF reader: read via PDF libraries; editing via a PDF library rather than driving the UI.
-- Chrome: dedicated profile + DevTools protocol/extension. No history access, by design.
-- **Needs clarification:** "Lingo", "Arena Simulator", Lightworks — I'm not certain which exact products/versions you mean or what automation interfaces they offer. Tell me which ones and I'll check before promising support.
+## Phase 5 — Acting on your computer (DONE, first version)
+- [x] Approval cards for every action + action log; read-only work needs no approval.
+- [x] Documents as files: Word, Excel, PowerPoint, PDF, text/code (workspace sandbox, backups).
+- [x] Chrome in a separate profile (Canva web included).
+- [x] VS Code (open at line) and Blender (inspect, run scripts).
+- [x] General screen control from the desktop app (screenshot + mouse/keyboard), tested on Linux/X11.
+- [ ] Live Office automation on Windows (COM) for documents that are open, and charts/pivots.
+- [ ] Autodesk Inventor API (COM, Windows), Lightworks: currently only through general screen control.
+- [ ] Verify the desktop control on Windows (DPI scaling, multi-monitor) — only tested on Linux.
 
 ## Phase 6 — Games and streaming
 - Games: observe via screen capture, act via virtual input; start with turn-based/simple games, since LLM latency is too high for action games without a fast reflex layer.

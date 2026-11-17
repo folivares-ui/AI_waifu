@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { delimiter } from "node:path";
 import { createBlenderTools, createVSCodeTools } from "./apps.js";
 import { BrowserController, createBrowserTools } from "./browser.js";
+import { DesktopClient, createDesktopTools } from "./desktop.js";
 import { createFileTools } from "./files.js";
 import { createScreenTool } from "./screen.js";
 import { Workspace } from "./workspace.js";
@@ -27,7 +28,7 @@ export let browserForShutdown: BrowserController | undefined;
 export function createToolFactory(env: NodeJS.ProcessEnv = process.env): ((ctx: ToolContext) => Tool[]) | undefined {
   const enabled = (env.TOOLS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   if (enabled.length === 0) return undefined;
-  const KNOWN = ["public_apis", "screen", "files", "browser", "vscode", "blender"];
+  const KNOWN = ["public_apis", "screen", "files", "browser", "vscode", "blender", "desktop"];
   const unknown = enabled.filter((t) => !KNOWN.includes(t));
   if (unknown.length) throw new Error(`Unknown TOOLS entries: ${unknown.join(", ")} (known: ${KNOWN.join(", ")})`);
   let apis: { entries: import("./catalog.js").ApiEntry[]; keys: ReturnType<typeof loadKeys> } | undefined;
@@ -57,12 +58,21 @@ export function createToolFactory(env: NodeJS.ProcessEnv = process.env): ((ctx: 
     browserForShutdown = browser;
     console.log(`[tools] browser enabled (own profile in ${env.BROWSER_PROFILE_DIR ?? "data/browser-profile"}; local addresses ${env.BROWSER_ALLOW_PRIVATE === "1" ? "ALLOWED" : "blocked"})`);
   }
+  let desktop: DesktopClient | undefined;
+  if (enabled.includes("desktop")) {
+    // Provided by the desktop app (apps/desktop) when it starts this server; absent in a plain browser setup.
+    if (env.WAIFU_DESKTOP_URL && env.WAIFU_DESKTOP_TOKEN) {
+      desktop = new DesktopClient(env.WAIFU_DESKTOP_URL, env.WAIFU_DESKTOP_TOKEN);
+      console.log("[tools] desktop control enabled (screen + mouse/keyboard; every action needs approval)");
+    } else console.warn("[tools] desktop control requested, but the server was not started by the desktop app: skipped");
+  }
   if (enabled.includes("screen")) console.log("[tools] screen enabled: she can look at your screen only while you share it in the client");
   return (ctx) => [
     ...(apis ? createPublicApiTools({ entries: apis.entries, keys: apis.keys, log: (m) => console.log(`[tools] ${m}`) }) : []),
     ...(enabled.includes("screen") ? [createScreenTool(ctx)] : []),
     ...(workspace ? createFileTools(workspace) : []),
     ...(browser ? createBrowserTools(browser) : []),
+    ...(desktop ? createDesktopTools(desktop) : []),
     ...(workspace && enabled.includes("vscode") ? createVSCodeTools(workspace) : []),
     ...(workspace && enabled.includes("blender") ? createBlenderTools(workspace) : []),
   ];

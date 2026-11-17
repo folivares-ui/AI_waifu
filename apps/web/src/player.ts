@@ -13,9 +13,11 @@ export interface Clip {
  * canceller treat it as the reference signal for the microphone.
  */
 export class ClipPlayer {
-  private ctx = new AudioContext();
-  private analyser = this.ctx.createAnalyser();
+  private ctx?: AudioContext;
+  private analyser?: AnalyserNode;
   private buf = new Uint8Array(1024);
+  /** False on machines/webviews without audio output: callers then fall back to showing/speaking the text. */
+  readonly available: boolean;
   private queue: { buffer: AudioBuffer; clip: Clip }[] = [];
   private decoding: Promise<void> = Promise.resolve();
   private current?: AudioBufferSourceNode;
@@ -25,19 +27,33 @@ export class ClipPlayer {
   lastEnded = 0;
 
   constructor(private cb: { onStart: (c: Clip) => void; onIdle: () => void }) {
-    this.analyser.fftSize = 1024;
-    this.analyser.connect(this.ctx.destination);
+    try {
+      this.ctx = new AudioContext();
+      this.analyser = this.ctx.createAnalyser();
+      this.analyser.fftSize = 1024;
+      this.analyser.connect(this.ctx.destination);
+    } catch (e) {
+      console.warn("No audio output available; voice clips will not play", e);
+      this.ctx = undefined;
+      this.analyser = undefined;
+    }
+    this.available = !!this.ctx;
   }
 
-  /** Must be called from a user gesture at least once (autoplay policy). */
+  /** Must be called from a user gesture at least once (autoplay policy). Never throws. */
   async unlock() {
-    if (this.ctx.state !== "running") await this.ctx.resume();
+    try {
+      if (this.ctx && this.ctx.state !== "running") await this.ctx.resume();
+    } catch {
+      /* stays suspended; playback will simply not start */
+    }
   }
 
   enqueue(clip: Clip) {
     const gen = this.generation;
     // Decode in order so clips can never overtake each other.
     this.decoding = this.decoding.then(async () => {
+      if (!this.ctx) return;
       try {
         const buffer = await this.ctx.decodeAudioData(clip.data.slice(0));
         if (gen !== this.generation) return;
@@ -58,6 +74,7 @@ export class ClipPlayer {
       this.cb.onIdle();
       return;
     }
+    if (!this.ctx || !this.analyser) return;
     this.playing = true;
     const src = this.ctx.createBufferSource();
     src.buffer = item.buffer;
@@ -72,7 +89,7 @@ export class ClipPlayer {
 
   /** Loudness 0..1 of what is playing right now. */
   level(): number {
-    if (!this.playing) return 0;
+    if (!this.playing || !this.analyser) return 0;
     this.analyser.getByteTimeDomainData(this.buf);
     let sum = 0;
     for (const b of this.buf) sum += ((b - 128) / 128) ** 2;

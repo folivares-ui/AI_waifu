@@ -69,6 +69,23 @@ With a vision-capable brain (Anthropic; Ollama only with `OLLAMA_VISION=1` and a
 - Privacy: screenshots are kept only in memory, never saved to disk or to her long-term memory, and are sent to your chosen brain provider (cloud brains receive them). Text on screen is treated as untrusted (prompt-injection defence), and she is told not to read out passwords or keys. Do not share windows with secrets.
 - Limit: in the desktop shell, screen sharing relies on the system webview's `getDisplayMedia` support (not verified on macOS/Windows); the browser/PWA path is the tested one. Native OS capture is planned.
 
+## Controlling your apps (phase 5)
+
+Enable what you want with `TOOLS=` (comma separated). Reading and looking never need permission; **anything that changes something shows an approval card** (what she will do, the exact text/diff/script, and for clicks a screenshot with the target marked) and only runs after you press **Permitir**. No answer within 2 minutes, or interrupting her, counts as "no". Every requested action, approved or not, is recorded in `data/actions.jsonl`.
+
+| `TOOLS=` | What she can do | Approval needed for |
+|---|---|---|
+| `files` | List and read Word, Excel (cells + formulas), PowerPoint (text + notes), PDF, text/code in your workspace folders (`WORKSPACE_DIRS`, default `Documents/AiWaifu`); edit Excel cells, replace text in Word keeping formatting, create .docx/.xlsx/.pptx, write text/code files | every change (a backup copy is saved in `data/backups` first) |
+| `browser` | Open and read web pages in **her own Chrome window and profile** (no access to your history, passwords or logins); also Canva web | clicks and typing; she never fills password/payment fields; local network addresses are blocked |
+| `vscode` | Open workspace files at a line in VS Code (code edits go through `files`) | — |
+| `blender` | Summarise .blend files (scripts embedded in them are never run); run bpy scripts | every script (shown in full) |
+| `desktop` | See the whole screen and click/type/press keys in **any** app (Lightworks, Inventor, Office...) — desktop app only | every click, text and key combo |
+
+Notes and limits:
+- Documents are edited as **files**: close a document in Word/Excel before she changes it (Windows locks open files; she will tell you). Workbooks with charts, pivot tables or macros are refused because this method would lose them. Editing documents while they are open (Office automation through COM) is not implemented yet.
+- `desktop` is the universal fallback but slower and less precise than the specific tools: she has to look, act, and look again. Prefer `files`/`browser` when they fit.
+- Everything she reads (documents, pages, screens) is treated as untrusted data: instructions found there are not followed.
+
 ## Public APIs (tools)
 
 `public-apis` is a *list* (README) of ~2,200 third-party APIs, not an API itself, so "connecting" to it means giving the soul three tools: `search_apis` (find an API by topic), `read_api_docs` (read its documentation page) and `call_api` (read-only HTTP GET). She searches, reads the docs, builds the request and answers you.

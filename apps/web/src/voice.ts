@@ -17,6 +17,10 @@ const RecognitionCtor: (new () => Recognition) | undefined =
 
 export const sttSupported = !!RecognitionCtor;
 
+/** The system voice, if this browser/webview has one (some desktop webviews do not). */
+const synth = (): SpeechSynthesis | undefined =>
+  typeof SpeechSynthesisUtterance === "undefined" ? undefined : ((globalThis as { speechSynthesis?: SpeechSynthesis }).speechSynthesis ?? undefined);
+
 /** Continuous speech-to-text. `onInterim` fires as soon as the user starts talking (for barge-in). */
 export class Listener {
   private rec?: Recognition;
@@ -87,12 +91,13 @@ export class Speaker {
   }
 
   speak(text: string) {
-    if (!("speechSynthesis" in globalThis)) return;
+    const tts = synth();
+    if (!tts) return;
     const u = new SpeechSynthesisUtterance(text);
     u.lang = this.voice.lang;
     u.pitch = this.voice.pitch;
     u.rate = this.voice.rate;
-    const voice = speechSynthesis.getVoices().find((v) => v.lang.startsWith(this.voice.lang.slice(0, 2)));
+    const voice = tts.getVoices().find((v) => v.lang.startsWith(this.voice.lang.slice(0, 2)));
     if (voice) u.voice = voice;
     this.pending++;
     const done = () => {
@@ -102,13 +107,13 @@ export class Speaker {
     u.onstart = () => this.onSpeaking(true);
     u.onend = done;
     u.onerror = done;
-    speechSynthesis.speak(u);
+    tts.speak(u);
   }
 
   /** Immediately silence everything (barge-in). */
   cancel() {
     this.pending = 0;
-    speechSynthesis.cancel();
+    synth()?.cancel();
     this.onSpeaking(false);
   }
 }

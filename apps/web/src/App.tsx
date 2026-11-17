@@ -55,7 +55,8 @@ export function App() {
       rememberSpoken(t);
       speaker.current?.speak(t);
     },
-    onAudio: (clip) => getPlayer().enqueue(clip),
+    // Without audio output, speak the sentence with the system voice (if any) instead of losing it.
+    onAudio: (clip) => (getPlayer().available ? getPlayer().enqueue(clip) : speaker.current?.speak(clip.text)),
     onInterruptedDone: stopSpeech,
     // The soul asked to look: answer only if the user is sharing (the capture itself is always the user's choice).
     onScreenRequest: (id) => {
