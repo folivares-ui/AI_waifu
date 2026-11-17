@@ -13,7 +13,7 @@ import { MemoryStore } from "./memory.js";
 import { Session } from "./session.js";
 import { loadSoul } from "./soul.js";
 import { createStaticHandler } from "./static.js";
-import { createToolFactory } from "./tools/index.js";
+import { browserForShutdown, createToolFactory } from "./tools/index.js";
 import { createSTT } from "./stt/index.js";
 import { createTTS } from "./tts/index.js";
 
@@ -139,6 +139,12 @@ if (parentPid > 0) {
       }
     }
   }, 2000).unref();
+}
+
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.on(sig, () => {
+    void (browserForShutdown?.close() ?? Promise.resolve()).finally(() => process.exit(0));
+  });
 }
 
 http.listen(port, host, () => {
