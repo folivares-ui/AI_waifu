@@ -95,7 +95,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
           console.info(`[avatar] converted model: ${tooned} materials made toon, hidden: [${hidden.join(", ")}], face rig: ${rig ? [...rig.channels].join(",") : "none"}, hair springs: ${springs ? springs.joints.size : 0}`);
         }
         vrm = v;
-        if (import.meta.env.DEV) Object.assign(window, { __vrm: v, __THREE: THREE, __camera: camera }); // for rig experiments
+        if (import.meta.env.DEV) Object.assign(window, { __vrm: v, __THREE: THREE, __camera: camera, __rig: rig }); // for rig experiments
         // Relaxed pose instead of the default T-pose.
         const bone = (n: string) => v.humanoid.getNormalizedBoneNode(n as never);
         const set = (n: string, x: number, y: number, z: number) => bone(n)?.rotation.set(x, y, z);
@@ -167,7 +167,8 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         want.mouthOpen = Math.max(want.mouthOpen ?? 0, Math.min(1, target.aa * 1.1 + target.oh * 0.9 + target.ih * 0.5));
         add("mouthNarrow", target.oh * 0.9);
         add("mouthWide", target.ih);
-        want.blink = Math.max(want.blink ?? 0, target.blink);
+        // Smiling eyes are already nearly shut: blink only the remaining gap.
+        want.blink = Math.max(want.blink ?? 0, target.blink * (1 - 0.85 * (want.eyeSmile ?? 0)));
         // Ears flick now and then, like the real animal's.
         if (rig.channels.has("earTwitchL")) {
           if (twitchT < 0 && t > nextTwitch) {
@@ -187,7 +188,9 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
           const fast = c === "blink" || c.startsWith("mouth") || c.startsWith("earTwitch");
           rigCur[c] = lerp(rigCur[c], want[c] ?? 0, Math.min(1, dt * (fast ? 22 : 6)));
         }
-        rig.apply(rigCur);
+        // Dev-only hooks to tune the rig from the browser console: pause it, or force exact weights.
+        const dev = import.meta.env.DEV ? (window as unknown as { __rigPause?: boolean; __rigOverride?: typeof rigCur }) : undefined;
+        if (!dev?.__rigPause) rig.apply(dev?.__rigOverride ?? rigCur);
       }
 
       // Gaze + idle body motion

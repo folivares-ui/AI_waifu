@@ -19,21 +19,34 @@ type Move = { bones: RegExp; mm: [number, number, number] } | { bones: RegExp; r
 
 const UPPER_LID = /^(Eye_up_0[1345]|Eye_up_1[1345]|Eye_double_0\d|Eye_sub_0[123]|Eyelashes|Eye_middle_01)_[LR]$/;
 const LOWER_LID = /^Eye_bottom_0\d_[LR]$/;
+const LOWER_LID_MID = /^Eye_bottom_0[23]_[LR]$/; // centre of the lower lid
+const LOWER_LID_ENDS = /^Eye_bottom_0[14]_[LR]$/; // inner and outer corners
 const BROW_ALL = /^Eyebrow_0[1234]_[LR]$/;
 const BROW_INNER = /^Eyebrow_0[14]_[LR]$/;
 const BROW_OUTER = /^Eyebrow_03_[LR]$/;
-const LOWER_LIP = /^Mouth_bottom_0[123]_[CLR]$/;
+const MOUTH_CORNER = /^Mouth_middle_[LR]$/;
 
 export const CHANNELS = {
   blink: [{ bones: UPPER_LID, mm: [0, -26, 0] }, { bones: LOWER_LID, mm: [0, 3, 0] }],
   eyeWide: [{ bones: UPPER_LID, mm: [0, 4, 0] }, { bones: LOWER_LID, mm: [0, -2, 0] }],
-  eyeSmile: [{ bones: UPPER_LID, mm: [0, -9, 0] }, { bones: LOWER_LID, mm: [0, 7, 0] }],
+  // Anime "smiling eyes": the lower lid arches up (centre more than the corners) to meet the lowered upper lid,
+  // leaving a sliver of iris at full weight.
+  eyeSmile: [{ bones: UPPER_LID, mm: [0, -13, 0] }, { bones: LOWER_LID_MID, mm: [0, 15, 0] }, { bones: LOWER_LID_ENDS, mm: [0, 8, 0] }],
   browUp: [{ bones: BROW_ALL, mm: [0, 7, 0] }],
   browAngry: [{ bones: BROW_INNER, mm: [0, -7, 0] }, { bones: BROW_OUTER, mm: [0, 4, 0] }],
   browSad: [{ bones: BROW_INNER, mm: [0, 7, 0] }, { bones: BROW_OUTER, mm: [0, -4, 0] }],
-  mouthOpen: [{ bones: LOWER_LIP, mm: [0, -7, 0] }, { bones: /^Chin$/, mm: [0, -4, 0] }, { bones: /^Tooth_bottom$/, mm: [0, -4, 0] }],
-  mouthSmile: [{ bones: /^Mouth_L$/, mm: [3, 3, 0] }, { bones: /^Mouth_R$/, mm: [-3, 3, 0] }],
-  mouthFrown: [{ bones: /^Mouth_L$/, mm: [0.5, -2.5, 0] }, { bones: /^Mouth_R$/, mm: [-0.5, -2.5, 0] }],
+  // Jaw drop graded from the centre of the lower lip to the corners, so the opening has a rounded bottom
+  // (combined with mouthSmile it becomes the open "D" smile).
+  mouthOpen: [
+    { bones: /^Mouth_bottom_01_[CLR]$/, mm: [0, -9, 0] },
+    { bones: /^Mouth_bottom_02_[LR]$/, mm: [0, -6.5, 0] },
+    { bones: /^Mouth_bottom_03_[LR]$/, mm: [0, -3.5, 0] },
+    { bones: /^Chin$/, mm: [0, -5.5, 0] },
+    { bones: /^Tooth_bottom$/, mm: [0, -5.5, 0] },
+  ],
+  // Corners lifted through Mouth_middle_* as well, otherwise the closed smile bends into a wavy "W".
+  mouthSmile: [{ bones: /^Mouth_L$/, mm: [3, 2, 0] }, { bones: /^Mouth_R$/, mm: [-3, 2, 0] }, { bones: MOUTH_CORNER, mm: [0, 2.5, 0] }],
+  mouthFrown: [{ bones: MOUTH_CORNER, mm: [0, -2.5, 0] }, { bones: /^Mouth_(bottom|up)_03_[LR]$/, mm: [0, -1.2, 0] }],
   mouthNarrow: [{ bones: /^Mouth_L$/, mm: [-2.5, 0, 0] }, { bones: /^Mouth_R$/, mm: [2.5, 0, 0] }],
   mouthWide: [{ bones: /^Mouth_L$/, mm: [2.5, 0.5, 0] }, { bones: /^Mouth_R$/, mm: [-2.5, 0.5, 0] }],
   // Animal ears (if the model has them): they carry a lot of the emotion.

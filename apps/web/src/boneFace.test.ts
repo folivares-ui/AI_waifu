@@ -75,7 +75,7 @@ describe("BoneFaceRig", () => {
     rig.apply({ mouthSmile: 1 });
     expect(l.position.x - l0.x).toBeCloseTo(0.003, 6);
     expect(r.position.x - r0.x).toBeCloseTo(-0.003, 6);
-    expect(l.position.y - l0.y).toBeCloseTo(0.003, 6);
+    expect(l.position.y - l0.y).toBeCloseTo(0.002, 6);
     rig.apply({ mouthSmile: 1, mouthNarrow: 1 });
     expect(l.position.x - l0.x).toBeCloseTo(0.0005, 6);
   });
