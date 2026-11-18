@@ -16,7 +16,7 @@ import { loadSoul, sttHint } from "./soul.js";
 import { createStaticHandler } from "./static.js";
 import { browserForShutdown, createToolFactory, onAllClientsGone } from "./tools/index.js";
 import { createSTT } from "./stt/index.js";
-import { createTTS } from "./tts/index.js";
+import { createTTS, VoiceStudioTTS } from "./tts/index.js";
 
 import { appPath, userOrApp, userPath } from "./paths.js";
 const port = Number(process.env.PORT ?? 8787);
@@ -52,6 +52,13 @@ const llm = createLLM(process.env, (s) => {
 });
 const tts = createTTS();
 const stt = createSTT();
+if (tts instanceof VoiceStudioTTS) {
+  const wanted = soul.voice.ttsVoice ?? process.env.TTS_VOICE ?? "default";
+  tts
+    .resolveVoice(wanted)
+    .then((id) => console.log(`[voice] VoiceStudio: "${wanted}" -> ${id === wanted ? "sent as given (could not list its voices: is VoiceStudio open?)" : `profile ${id}`}`))
+    .catch((e) => console.warn(`[voice] ${e instanceof Error ? e.message : e}`));
+}
 const makeTools = createToolFactory();
 const caps: Capabilities = { tts: !!tts, stt: !!stt, vision: !!llm.vision };
 const memory = new MemoryStore(process.env.MEMORY_FILE ?? userPath("data/memory.json"));

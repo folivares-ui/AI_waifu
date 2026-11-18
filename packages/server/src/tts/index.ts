@@ -82,6 +82,54 @@ export class OpenAICompatibleTTS implements TTSProvider {
  * `npm run tts:test -w @waifu/server` with your key and check their current docs if anything is rejected.
  * The voice id comes from your ElevenLabs voice library (TTS_VOICE or soul.voice.ttsVoice).
  */
+/**
+ * VoiceStudio: its speech endpoint expects a saved voice PROFILE ID, while the soul names the voice ("Rice Shower").
+ * The name is looked up in GET /profiles (cached for a minute, so a voice created later is found). An unknown name
+ * is reported clearly instead of silently getting VoiceStudio's default voice.
+ */
+export class VoiceStudioTTS extends OpenAICompatibleTTS {
+  private profiles?: { at: number; list: { id: string; name: string }[] | undefined };
+  constructor(
+    private vs: ConstructorParameters<typeof OpenAICompatibleTTS>[0],
+    private fetchProfiles: (root: string) => Promise<{ id: string; name: string }[] | undefined> = defaultProfiles,
+    private now: () => number = Date.now,
+  ) {
+    super(vs);
+  }
+
+  private async list() {
+    if (!this.profiles || this.now() - this.profiles.at > 60_000) {
+      const root = this.vs.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
+      this.profiles = { at: this.now(), list: await this.fetchProfiles(root).catch(() => undefined) };
+    }
+    return this.profiles.list;
+  }
+
+  async resolveVoice(voice: string | undefined): Promise<string | undefined> {
+    if (!voice || voice === "default") return voice;
+    const list = await this.list();
+    if (!list) return voice; // this VoiceStudio version has no /profiles: send it as given
+    const found = list.find((p) => String(p.id) === voice) ?? list.find((p) => String(p.name).toLowerCase() === voice.toLowerCase());
+    if (found) return String(found.id);
+    const names = list.map((p) => `"${p.name}"`).join(", ") || "ninguna";
+    throw new Error(
+      `VoiceStudio no tiene una voz llamada "${voice}" (voces guardadas: ${names}). Creala con: npm run voice:create -- --file data/voices/rice-shower/rice-ref-2.wav --name "${voice}"`,
+    );
+  }
+
+  async synthesize(text: string, opts: TTSOptions, signal?: AbortSignal): Promise<TTSResult> {
+    const voice = await this.resolveVoice(opts.voice ?? this.vs.voice);
+    return super.synthesize(text, { ...opts, voice }, signal);
+  }
+}
+
+async function defaultProfiles(root: string): Promise<{ id: string; name: string }[] | undefined> {
+  const res = await fetch(`${root}/profiles`, { signal: AbortSignal.timeout(3000) });
+  if (!res.ok) return undefined;
+  const body = (await res.json()) as unknown;
+  return Array.isArray(body) ? (body as { id: string; name: string }[]) : undefined;
+}
+
 export class ElevenLabsTTS implements TTSProvider {
   readonly name = "elevenlabs";
   constructor(
@@ -162,7 +210,7 @@ export function createTTS(env: NodeJS.ProcessEnv = process.env): TTSProvider | u
       // VoiceStudio (https://github.com/debpalash/VoiceStudio) running on this machine: its OpenAI-compatible API.
       // Loopback calls need no key; "tts-1" is an alias for its active engine; "default" = its default voice
       // (set TTS_VOICE or soul.voice.ttsVoice to a saved VoiceStudio voice profile ID or name).
-      return new OpenAICompatibleTTS({
+      return new VoiceStudioTTS({
         name: "voicestudio",
         baseUrl: env.TTS_BASE_URL ?? "http://localhost:3900/v1",
         apiKey: env.TTS_API_KEY,

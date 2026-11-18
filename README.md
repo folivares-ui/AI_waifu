@@ -145,7 +145,7 @@ Reference clips cut from the voice sample you provided live in `data/voices/rice
 npm run voice:create -- --file data/voices/rice-shower/rice-ref-2.wav --name "Rice Shower"
 TTS_PROVIDER=voicestudio STT_PROVIDER=voicestudio npm run dev:server
 ```
-The soul already uses `"ttsVoice": "Rice Shower"`. The reference is Japanese; VoiceStudio uses it for the timbre and delivery while she speaks Spanish.
+The soul already uses `"ttsVoice": "Rice Shower"`; the server looks up that name in VoiceStudio and uses its profile ID (at startup PowerShell shows `[voice] VoiceStudio: "Rice Shower" -> profile ...`, or explains what is missing). The reference is Japanese; VoiceStudio uses it for the timbre and delivery while she speaks Spanish.
 
 This repo also includes VoiceStudio's own Claude Code skill (`.claude/skills/voicestudio`, AGPL-3.0, unmodified, see its NOTICE), so a Claude Code session in this project knows how to drive VoiceStudio's API (voices, cloning, transcription, MCP).
 

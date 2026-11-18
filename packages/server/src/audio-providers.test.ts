@@ -70,6 +70,7 @@ describe("VoiceStudio presets", () => {
     const bodies: any[] = [];
     const urls: string[] = [];
     const base = await listen(async (req, res) => {
+      if (req.url === "/profiles") return void res.writeHead(404).end(); // older VoiceStudio: name sent as given
       let b = "";
       for await (const c of req) b += c;
       urls.push(String(req.url));
