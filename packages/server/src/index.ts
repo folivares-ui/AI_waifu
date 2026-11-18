@@ -219,6 +219,17 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
+// A second copy (another PowerShell window, or the desktop app) already holds the port: explain it plainly.
+const portBusy = (e: NodeJS.ErrnoException) => {
+  if (e.code !== "EADDRINUSE") throw e;
+  console.error(
+    `\n[!] El puerto ${port} ya esta en uso: Rice ya esta abierta en otra ventana de PowerShell o en la app de escritorio.\n` +
+      `    Cierra la otra (Ctrl+C o cierra la app) y vuelve a intentarlo, o usa otro puerto: pon PORT=8788 en el .env.\n`,
+  );
+  process.exit(1);
+};
+http.on("error", portBusy);
+wss.on("error", portBusy);
 http.listen(port, host, () => {
   const scheme = secure ? "https" : "http";
   console.log(`[${soul.name}] soul server on ${scheme}://${host}:${port} | brain=${llm.name} tts=${tts?.name ?? "browser"} stt=${stt?.name ?? "browser"} | memories=${memory.size} | web=${serveWeb ? "served" : "not served (run npm run build)"}`);
