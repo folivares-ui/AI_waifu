@@ -23,8 +23,13 @@ export class MockProvider implements LLMProvider {
         "signo de victoria (V)": "[emotion:happy] ¡Victoria! Ganbaru, Onii-sama.",
         "te quiero (mano)": "[emotion:shy] O-Onii-sama... Rice tambien le quiere mucho...",
         "palma abierta": "[emotion:neutral] Sí... Rice espera.",
+        "dedo hacia arriba": "[emotion:thinking] ¿Eh? ¿Hay algo arriba, Onii-sama?",
+        puño: "[emotion:surprised] ¡Ganbaru! Rice tambien se esforzara.",
       };
-      yield canned[touch[2]] ?? "[emotion:shy] E-eh... Onii-sama, eso no... A Rice le da mucha verguenza...";
+      const fallback = touch[1].startsWith("Caricia")
+        ? "[emotion:shy] E-eh... Onii-sama, eso no... A Rice le da mucha verguenza..."
+        : "[emotion:happy] Rice lo vio, Onii-sama.";
+      yield canned[touch[2]] ?? fallback;
       return;
     }
     const lastMsg0 = req.messages.at(-1);

@@ -147,6 +147,11 @@ The browser console prints an `[avatar] converted model: ...` line listing what 
 
 Check the license of any model you use: a "CC-BY" tag on a fan upload of a commercial game's character does not necessarily cover the character itself. Keep such models for personal use (the `avatars/` folder is git-ignored, so they are never pushed).
 
+## Petting and gestures
+- **Petting:** move the cursor (or a finger) over her. Head pats, ears, cheeks, hair, hands... each gets its own expressive reaction (and a short spoken line now and then); private areas make her flustered and she politely asks you to stop. Hovering without moving does nothing.
+- **Camera gestures (opt-in):** press the camera button. While it is on, a preview with a red "Camara" badge is visible; the images are analysed on your device and never sent anywhere (only the gesture name). 👋 wave (she waves back), 👍, 👎, ✌️, 🤟, ☝️, ✊, and ✋ held still = "stop talking". A held gesture counts once. Setup: `npm run setup:gestures` (also runs automatically before `dev`/`build` of the web app).
+- The microphone and the camera are only opened after you press their buttons, and are closed when you switch them off or close the app.
+
 ## Icons from your character
 The app icons (PWA, desktop) are the face of the current avatar. After changing the model, regenerate them (needs Playwright + Chromium; the web app must be running):
 ```bash

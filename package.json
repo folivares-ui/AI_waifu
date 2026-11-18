@@ -14,6 +14,7 @@
     "test": "npm run test -w @waifu/core && npm run test -w @waifu/server && npm run test -w @waifu/web",
     "typecheck": "npm run build -w @waifu/core && npm run typecheck -w @waifu/server && npm run typecheck -w @waifu/web",
     "avatar:sample": "node scripts/fetch-sample-avatar.mjs",
-    "voice:create": "node scripts/voicestudio-voice.mjs"
+    "voice:create": "node scripts/voicestudio-voice.mjs",
+    "setup:gestures": "node scripts/fetch-gesture-model.mjs"
   }
 }

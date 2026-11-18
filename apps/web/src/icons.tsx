@@ -62,3 +62,9 @@ export const RoseIcon = (p: P) => (
     <path d="M12 18c-1.5-1.5-3.5-1.5-4.5-.5M12 17c1.5-1.2 3.2-1.2 4.2-.2" />
   </S>
 );
+export const VideoIcon = (p: P) => (
+  <S {...p}>
+    <rect x="3" y="6" width="13" height="12" rx="2.5" />
+    <path d="M16 10.5l5-3v9l-5-3z" />
+  </S>
+);

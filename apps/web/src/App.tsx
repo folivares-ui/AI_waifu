@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { encodeWav, looksLikeEcho, matchName, resample, type Emotion, type ScreenImage } from "@waifu/core";
+import { encodeWav, looksLikeEcho, matchName, resample, type Emotion, type Gesture, type ScreenImage } from "@waifu/core";
 import { ApprovalCard } from "./ApprovalCard";
 import { AvatarStage } from "./AvatarStage";
-import { CameraIcon, CloseIcon, EyeIcon, GearIcon, MicIcon, RoseIcon, ScreenIcon, SendIcon, StopIcon } from "./icons";
+import { GESTURE_EMOJI, GestureCamera } from "./gestures";
+import { CameraIcon, CloseIcon, EyeIcon, GearIcon, MicIcon, RoseIcon, ScreenIcon, SendIcon, StopIcon, VideoIcon } from "./icons";
 import { startMic, type MicHandle } from "./mic";
 import { transcribe } from "./net";
 import { ClipPlayer } from "./player";
@@ -23,6 +24,10 @@ export function App() {
   const [sharing, setSharing] = useState(false);
   const [watching, setWatching] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [lastGesture, setLastGesture] = useState<Gesture>();
+  const camera = useRef<GestureCamera | undefined>(undefined);
+  const previewRef = useRef<HTMLDivElement>(null);
   const screen = useRef<ScreenShare | undefined>(undefined);
   const watchRef = useRef(false);
   watchRef.current = watching;
@@ -241,6 +246,48 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watching]);
 
+  // Camera gestures: only while the user has switched the camera on; analysed on this device.
+  const onGesture = (g: Gesture) => {
+    setLastGesture(g);
+    setTimeout(() => setLastGesture((cur) => (cur === g ? undefined : cur)), 1800);
+    if (g === "open_palm") {
+      // "Stop" sign: she stops talking (no spoken answer).
+      stopSpeech();
+      soul.interrupt();
+      return;
+    }
+    const mood: Partial<Record<Gesture, Emotion>> = { wave: "happy", thumbs_up: "happy", thumbs_down: "sad", victory: "happy", love: "shy", fist: "surprised", pointing_up: "thinking" };
+    if (mood[g]) setEmotion(mood[g]!);
+    if (g === "wave") window.dispatchEvent(new CustomEvent("waifu:avatar-wave"));
+    soul.sendGesture(g);
+  };
+  const toggleCamera = async () => {
+    if (cameraOn) {
+      camera.current?.stop();
+      setCameraOn(false);
+      return;
+    }
+    try {
+      camera.current ??= new GestureCamera();
+      await camera.current.start(onGestureRef.current, () => setCameraOn(false));
+      setCameraOn(true);
+    } catch (e) {
+      camera.current?.stop();
+      if (!(e instanceof DOMException && e.name === "NotAllowedError")) setMicError(`No pude usar la camara: ${e instanceof Error ? e.message : e}`);
+      else setMicError("Permiso de camara denegado.");
+    }
+  };
+  const onGestureRef = useRef(onGesture);
+  onGestureRef.current = onGesture;
+  useEffect(() => {
+    // show the live preview inside the bubble while the camera is on
+    const box = previewRef.current;
+    const video = camera.current?.preview;
+    if (cameraOn && box && video && video.parentElement !== box) box.prepend(video);
+  }, [cameraOn]);
+  // Never leave the camera on when the app goes away.
+  useEffect(() => () => camera.current?.stop(), []);
+
   const canListen = caps.stt || sttSupported;
   const short = soul.names?.aliases.at(-1) ?? soul.name;
   const mood = !soul.connected
@@ -274,6 +321,18 @@ export function App() {
           </button>
         </div>
       </header>
+
+      {cameraOn && (
+        <div className="cam-bubble" ref={previewRef} role="status" aria-label="Camara activa">
+          <span className="cam-badge">
+            <span className="rec" aria-hidden="true" /> Camara
+          </span>
+          {lastGesture && <span className="cam-gesture" aria-live="polite">{GESTURE_EMOJI[lastGesture]}</span>}
+          <button type="button" className="cam-close" aria-label="Apagar camara" onClick={() => void toggleCamera()}>
+            <CloseIcon size={14} />
+          </button>
+        </div>
+      )}
 
       {sharing && (
         <div className="sharing" role="status">
@@ -327,6 +386,16 @@ export function App() {
             >
               <MicIcon size={30} />
             </button>
+            <button
+              type="button"
+              className={`round${cameraOn ? " on" : ""}`}
+              aria-label={cameraOn ? "Apagar camara" : "Encender camara (gestos)"}
+              aria-pressed={cameraOn}
+              title={cameraOn ? "Apagar la camara" : "Encender la camara para que reconozca tus gestos (todo se analiza en tu equipo)"}
+              onClick={() => void toggleCamera()}
+            >
+              <VideoIcon />
+            </button>
             <button type="button" className="round" aria-label="Callar" title="Que deje de hablar" onClick={() => { stopSpeech(); soul.interrupt(); }}>
               <StopIcon />
             </button>
@@ -376,6 +445,12 @@ export function App() {
                 <small>
                   Oido: {caps.stt ? "servidor" : sttSupported ? "navegador" : "no disponible (escribe)"} · Habla: {caps.tts ? "servidor" : "navegador"}
                 </small>
+              </span>
+            </div>
+            <div className="row info">
+              <span>
+                Gestos con la camara
+                <small>👋 saludar · 👍 bien · 👎 mal · ✌️ victoria · 🤟 te quiero · ✋ (quieta) que se calle · ☝️ pensar. Solo con la camara encendida; las imagenes no salen de tu equipo.</small>
               </span>
             </div>
             <div className="row info">

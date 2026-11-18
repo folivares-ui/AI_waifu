@@ -92,6 +92,10 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
       canvas.style.cursor = "";
     };
     canvas.addEventListener("pointermove", onPointerMove);
+    // She waves back when you wave at the camera.
+    let waveStart = -10;
+    const onWave = () => (waveStart = timer.getElapsed());
+    window.addEventListener("waifu:avatar-wave", onWave);
     canvas.addEventListener("pointerleave", onPointerLeave);
     let twitchT = -1;
     let twitchSide: Channel = "earTwitchL";
@@ -271,6 +275,16 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         head.rotation.z = lerp(head.rotation.z, pose.tilt + (p.listening ? 0.03 : 0) - (re?.tiltToward ?? 0) * side * mirror * k, dt * 3);
       }
       const spine = vrm.humanoid.getNormalizedBoneNode("spine");
+      // Waving back: right arm up, forearm swinging, for ~2.4 s.
+      const wk = envelope(t, waveStart, waveStart + 1.6, 0.35, 0, 0.5);
+      const armK = vrm.meta.metaVersion === "0" ? -1 : 1;
+      const rUp = vrm.humanoid.getNormalizedBoneNode("rightUpperArm");
+      const rLow = vrm.humanoid.getNormalizedBoneNode("rightLowerArm");
+      if (rUp && rLow) {
+        rUp.rotation.z = lerp(1.2 * armK, -0.25 * armK, wk);
+        rUp.rotation.x = 0;
+        rLow.rotation.z = lerp(0.1 * armK, -(0.9 + 0.35 * Math.sin(t * 9)) * armK, wk);
+      }
       const shrinkK = re?.shrink && reaction ? env : 0;
       if (spine) {
         spine.rotation.x = lerp(spine.rotation.x, Math.sin(t * 1.5) * 0.012 - 0.16 * shrinkK, dt * 6); // steps back
@@ -339,6 +353,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
 
     return () => {
       window.removeEventListener("waifu:capture", onCapture);
+      window.removeEventListener("waifu:avatar-wave", onWave);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerleave", onPointerLeave);
       disposed = true;
