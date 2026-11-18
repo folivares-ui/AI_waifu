@@ -68,3 +68,9 @@ export const VideoIcon = (p: P) => (
     <path d="M16 10.5l5-3v9l-5-3z" />
   </S>
 );
+export const HistoryIcon = (p: P) => (
+  <S {...p}>
+    <path d="M4 5h16v11H9l-5 4V5z" />
+    <path d="M8 9h8M8 12h5" />
+  </S>
+);

@@ -46,7 +46,7 @@ export type ServerMessage =
    */
   | { type: "sentence"; turnId: number; text: string; emotion: Emotion; /** What to say aloud, if not `text` (e.g. Japanese). */ speech?: string; speechLang?: string }
   /** Synthesized speech for one sentence, in order. `data` is base64. Emotion applies while it plays. */
-  | { type: "audio"; turnId: number; seq: number; text: string; emotion: Emotion; mime: string; data: string }
+  | { type: "audio"; turnId: number; seq: number; text: string; emotion: Emotion; mime: string; data: string; /** The words spoken, if not `text` (e.g. Japanese). */ speech?: string }
   /** The soul is running a tool (e.g. querying a public API). For UI feedback only. */
   | { type: "tool"; turnId: number; name: string; status: "start" | "end"; ok?: boolean }
   /** The soul wants to look at the screen (tool call). Client answers with `screen_frame`. */

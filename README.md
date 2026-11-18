@@ -182,6 +182,8 @@ Check the license of any model you use: a "CC-BY" tag on a fan upload of a comme
 Rice speaks **Japanese** (like in the anime) while her words are shown in **Spanish**; you keep talking to her in Spanish. Each sentence is translated in character (she calls herself 「ライス」 and you 「お兄さま」) by the same brain just before it is spoken, so it costs one extra short request per sentence and adds a little delay. Switch it in Ajustes → "Hablar en japones" (remembered on that device), with `SPEECH_LANG` in `.env`, or with `speechLang`/`speechStyle` in the soul file.
 - Browser voice: needs a Japanese voice. Edge and Chrome usually include one (online natural voices); on Windows you can add one in Configuración → Hora e idioma → Voz → Agregar voces → Japonés. The app tells you if none is found.
 - VoiceStudio: the sentence is synthesized in Japanese with her cloned voice (whose reference clip is Japanese).
+- Her words appear in an anime-style dialog box (name tab, Spanish typed out as she speaks, the Japanese she says in small text below). The full conversation is in the history button at the top.
+- She never falls back to speaking Spanish: a translation that is not Japanese is retried once, and if it still fails that line is only shown.
 - Speech recognition stays Spanish. Use headphones if the microphone picks up her Japanese voice.
 
 ## Petting and gestures

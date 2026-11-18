@@ -3,12 +3,14 @@ import { encodeWav, looksLikeEcho, matchName, resample, type Emotion, type Gestu
 import { ApprovalCard } from "./ApprovalCard";
 import { AvatarStage } from "./AvatarStage";
 import { GESTURE_EMOJI, GestureCamera } from "./gestures";
-import { CameraIcon, CloseIcon, EyeIcon, GearIcon, MicIcon, RoseIcon, ScreenIcon, SendIcon, StopIcon, VideoIcon } from "./icons";
+import { CameraIcon, CloseIcon, EyeIcon, GearIcon, MicIcon, RoseIcon, ScreenIcon, SendIcon, StopIcon, VideoIcon, HistoryIcon } from "./icons";
 import { startMic, type MicHandle } from "./mic";
 import { savePersonal, transcribe } from "./net";
 import { ClipPlayer } from "./player";
 import { ScreenShare } from "./screen";
 import { storedSpeechLang, useSoul } from "./useSoul";
+import { DialogBox } from "./DialogBox";
+import { addLine, markStarted, revealStale, type Dialog } from "./dialog";
 import { Listener, Speaker, sttSupported } from "./voice";
 
 const ECHO_WINDOW_MS = 1200; // after she stops talking, treat mic input with extra suspicion
@@ -22,6 +24,7 @@ export function App() {
   const [voiceHint, setVoiceHint] = useState<string>();
   const voiceWarned = useRef(false);
   const [chosenSpokenLang, setSpokenLang] = useState(storedSpeechLang);
+  const spokenLangRef = useRef("es-ES");
   const [status, setStatus] = useState("");
   const [text, setText] = useState("");
   const [micError, setMicError] = useState<string>();
@@ -45,12 +48,32 @@ export function App() {
   const spoken = useRef<string[]>([]); // what she said recently, for the echo guard
   const rememberSpoken = (t: string) => (spoken.current = [...spoken.current.slice(-5), t]);
 
+  // Visual-novel dialog box: each sentence appears when she starts saying it.
+  const [dialog, setDialog] = useState<Dialog>({ turn: -1, lines: [] });
+  const dialogRef = useRef(dialog);
+  const updateDialog = (f: (d: Dialog) => Dialog) => {
+    dialogRef.current = f(dialogRef.current);
+    setDialog(dialogRef.current);
+  };
+  const pushLine = (turn: number, text: string, speech: string | undefined) => {
+    let key = 0;
+    updateDialog((d) => {
+      const r = addLine(d, turn, text, speech, Date.now());
+      key = r.key;
+      return r.dialog;
+    });
+    return key;
+  };
+  const started = (key: number) => updateDialog((d) => markStarted(d, key));
+  const [historyOpen, setHistoryOpen] = useState(false);
+
   const getPlayer = () =>
     (player.current ??= new ClipPlayer({
       onStart: (c) => {
         setEmotion(c.emotion);
         setSpeaking(true);
         rememberSpoken(c.text);
+        if (c.key) started(c.key);
       },
       onIdle: () => setSpeaking(false),
     }));
@@ -58,15 +81,20 @@ export function App() {
   const stopSpeech = () => {
     player.current?.stop();
     speaker.current?.cancel();
+    // What she did not get to say is not shown either.
+    updateDialog((d) => ({ ...d, lines: d.lines.filter((l) => l.started) }));
   };
 
   const soul = useSoul({
     // The text stays on screen (subtitles); what she says aloud may be another language (e.g. Japanese).
-    onSentence: (t, e, speech) => {
+    onSentence: (t, e, speech, turnId) => {
       setEmotion(e);
       rememberSpoken(t);
-      if (speech) rememberSpoken(speech.say);
-      const ok = speaker.current?.speak(speech?.say ?? t, speech?.lang);
+      if (speech?.say) rememberSpoken(speech.say);
+      const key = pushLine(turnId, t, speech?.say);
+      if (speech && !speech.say) return; // shown but not spoken (it could not be said in her language)
+      const ok = speaker.current?.speak(speech?.say ?? t, speech?.lang, () => started(key));
+      if (ok !== true) started(key);
       if (ok === false && speech?.lang && !voiceWarned.current) {
         voiceWarned.current = true;
         setVoiceHint(
@@ -77,7 +105,11 @@ export function App() {
       }
     },
     // Without audio output, speak the sentence with the system voice (if any) instead of losing it.
-    onAudio: (clip) => (getPlayer().available ? getPlayer().enqueue(clip) : speaker.current?.speak(clip.text)),
+    onAudio: (clip) => {
+      clip.key = pushLine(clip.turnId ?? -1, clip.text, clip.speech);
+      if (getPlayer().available) getPlayer().enqueue(clip);
+      else if (speaker.current?.speak(clip.speech ?? clip.text, clip.speech ? spokenLangRef.current : undefined, () => started(clip.key!)) !== true) started(clip.key);
+    },
     onInterruptedDone: stopSpeech,
     // The soul asked to look: answer only if the user is sharing (the capture itself is always the user's choice).
     onScreenRequest: (id) => {
@@ -96,6 +128,17 @@ export function App() {
 
   // Errors are shown as a toast that goes away by itself.
   const spokenLang = chosenSpokenLang ?? soul.voice.speechLang ?? soul.voice.lang;
+  spokenLangRef.current = spokenLang;
+  // Sentences that are not being played (muted, no voice, an error) still appear after a moment.
+  useEffect(() => {
+    const t = setInterval(() => {
+      updateDialog((d) => revealStale(d, Date.now(), !busy()));
+    }, 400);
+    return () => clearInterval(t);
+  }, []);
+  const lastLine = soul.lines.at(-1);
+  const thinking = lastLine?.who === "user";
+  const lastUser = [...soul.lines].reverse().find((l) => l.who === "user")?.text;
   const errorText = micError ?? soul.error;
   useEffect(() => {
     if (!micError) return;
@@ -331,6 +374,9 @@ export function App() {
           <button type="button" className="chip" aria-label="Capturar" title="Guardar una foto de ella" onClick={() => window.dispatchEvent(new CustomEvent("waifu:capture", { detail: { name: soul.name } }))}>
             <CameraIcon size={18} /> <span>Capturar</span>
           </button>
+          <button type="button" className="round small" aria-label="Historial" title="Ver la conversacion" onClick={() => setHistoryOpen(true)}>
+            <HistoryIcon size={18} />
+          </button>
           <button type="button" className="round small" aria-label="Ajustes" title="Ajustes" onClick={() => setSettingsOpen(true)}>
             <GearIcon size={20} />
           </button>
@@ -359,14 +405,7 @@ export function App() {
       )}
 
       <div className={`bottom${soul.approvals.length ? " asking" : ""}`}>
-        <section className="log" aria-live="polite" aria-label="Conversacion">
-          {soul.lines.slice(-30).map((l) => (
-            <p key={l.id} className={`bubble ${l.who}`}>
-              {l.who === "soul" && <b>{soul.name}</b>}
-              <span>{l.text}</span>
-            </p>
-          ))}
-        </section>
+        <DialogBox name={soul.name} lines={dialog.lines} thinking={thinking} userText={lastUser} />
 
         {soul.approvals.map((r) => (
           <ApprovalCard key={r.id} req={r} name={short} onAnswer={(ok) => soul.answerApproval(r.id, ok)} />
@@ -434,6 +473,28 @@ export function App() {
             {soul.notice ?? voiceHint}
           </p>
         )
+      )}
+
+      {historyOpen && (
+        <div className="sheet-backdrop" onClick={() => setHistoryOpen(false)}>
+          <section className="sheet history" role="dialog" aria-modal="true" aria-label="Conversacion" onClick={(e) => e.stopPropagation()}>
+            <header>
+              <h2>Conversacion</h2>
+              <button type="button" className="round small" aria-label="Cerrar conversacion" onClick={() => setHistoryOpen(false)}>
+                <CloseIcon size={18} />
+              </button>
+            </header>
+            <div className="log">
+              {soul.lines.length === 0 && <p className="empty">Todavia no habeis hablado.</p>}
+              {soul.lines.map((l) => (
+                <p key={l.id} className={`bubble ${l.who}`}>
+                  {l.who === "soul" && <b>{soul.name}</b>}
+                  <span>{l.text}</span>
+                </p>
+              ))}
+            </div>
+          </section>
+        </div>
       )}
 
       {settingsOpen && (

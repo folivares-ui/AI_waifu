@@ -109,7 +109,7 @@ export class Speaker {
    * Speaks a line with the system voice, in `lang` (default: her text language). Returns false when this
    * browser/Windows has no voice for that language (the caller can tell the user once).
    */
-  speak(text: string, lang = this.voice.lang): boolean {
+  speak(text: string, lang = this.voice.lang, onStart?: () => void): boolean {
     const tts = synth();
     if (!tts) return false;
     const u = new SpeechSynthesisUtterance(text);
@@ -123,7 +123,10 @@ export class Speaker {
       this.pending = Math.max(0, this.pending - 1);
       if (this.pending === 0) this.onSpeaking(false);
     };
-    u.onstart = () => this.onSpeaking(true);
+    u.onstart = () => {
+      this.onSpeaking(true);
+      onStart?.();
+    };
     u.onend = done;
     u.onerror = done;
     tts.speak(u);

@@ -2,11 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { PROACTIVE_TURN_BASE, type Capabilities, type ClientMessage, type Emotion, type ScreenImage, type ServerMessage, type VoiceHints, type NameConfig, type TouchRegion, type Gesture } from "@waifu/core";
 import { b64ToBuffer, type Clip } from "./player";
 import { serverBase } from "./net";
+import { cleanTags } from "./dialog";
 
 export interface ChatLine {
   id: number;
   who: "user" | "soul";
   text: string;
+  /** Her text as streamed, tags included (tags are removed from the whole text, never per token). */
+  raw?: string;
 }
 
 function wsUrl(): string {
@@ -24,7 +27,7 @@ export function storedSpeechLang(): string | undefined {
   }
 }
 
-export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion, speech?: { say: string; lang?: string }) => void; onAudio: (clip: Clip) => void; onInterruptedDone: () => void; onScreenRequest: (requestId: string) => void }) {
+export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion, speech: { say: string; lang?: string } | undefined, turnId: number) => void; onAudio: (clip: Clip) => void; onInterruptedDone: () => void; onScreenRequest: (requestId: string) => void }) {
   const ws = useRef<WebSocket | undefined>(undefined);
   const h = useRef(handlers);
   h.current = handlers;
@@ -90,15 +93,16 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion,
           setLines((ls) => {
             const last = ls.at(-1);
             if (m.turnId === currentTurn.current && last?.who === "soul") {
-              return [...ls.slice(0, -1), { ...last, text: last.text + m.text.replace(/\[emotion:[^\]]*\]?/gi, "") }];
+              const raw = (last.raw ?? last.text) + m.text;
+              return [...ls.slice(0, -1), { ...last, raw, text: cleanTags(raw) }];
             }
             currentTurn.current = m.turnId;
-            return [...ls, { id: nextId.current++, who: "soul", text: m.text.replace(/\[emotion:[^\]]*\]?/gi, "") }];
+            return [...ls, { id: nextId.current++, who: "soul", raw: m.text, text: cleanTags(m.text) }];
           });
         } else if (m.type === "sentence") {
-          if (!dropped(m.turnId)) h.current.onSentence(m.text, m.emotion, m.speech ? { say: m.speech, lang: m.speechLang } : undefined);
+          if (!dropped(m.turnId)) h.current.onSentence(m.text, m.emotion, m.speech !== undefined ? { say: m.speech, lang: m.speechLang } : undefined, m.turnId);
         } else if (m.type === "audio") {
-          if (!dropped(m.turnId)) h.current.onAudio({ data: b64ToBuffer(m.data), emotion: m.emotion, text: m.text });
+          if (!dropped(m.turnId)) h.current.onAudio({ data: b64ToBuffer(m.data), emotion: m.emotion, text: m.text, speech: m.speech, turnId: m.turnId });
         } else if (m.type === "approval_request") {
           setApprovals((a) => [...a, m]);
         } else if (m.type === "approval_cancel") {

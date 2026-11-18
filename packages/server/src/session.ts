@@ -262,8 +262,9 @@ export class Session {
         ? translateForSpeech(this.llm, this.soul, spoken, lang, abort.signal).then(
             (say) => ({ say, lang }),
             (err) => {
-              if (!abort.signal.aborted) console.warn(`[speech] translation failed, speaking the original: ${err instanceof Error ? err.message : err}`);
-              return { say: spoken, lang: this.soul.voice.lang };
+              // Never fall back to speaking Spanish when she is meant to speak Japanese: the line is only shown.
+              if (!abort.signal.aborted) console.warn(`[speech] translation failed, this line is shown but not spoken: ${err instanceof Error ? err.message : err}`);
+              return { say: "", lang };
             },
           )
         : Promise.resolve({ say: spoken, lang: this.soul.voice.lang });
@@ -278,12 +279,18 @@ export class Session {
         return;
       }
       const mySeq = seq++;
-      const synth = speech.then((sp) => this.tts!.synthesize(sp.say, { voice: this.soul.voice.ttsVoice, lang: sp.lang }, abort.signal));
+      const silent = speech.then((sp) => sp.say === "");
+      const synth = speech.then((sp) => (sp.say ? this.tts!.synthesize(sp.say, { voice: this.soul.voice.ttsVoice, lang: sp.lang }, abort.signal) : Promise.reject(new Error("silent line"))));
       synth.catch(() => {}); // handled in the chain below
       chain = chain.then(async () => {
         try {
+          if (await silent) {
+            if (!abort.signal.aborted) asSentence(await speech);
+            return;
+          }
           const { audio, mime } = await synth;
-          if (!abort.signal.aborted) this.send({ type: "audio", turnId, seq: mySeq, text, emotion, mime, data: audio.toString("base64") });
+          const sp = await speech;
+          if (!abort.signal.aborted) this.send({ type: "audio", turnId, seq: mySeq, text, emotion, mime, data: audio.toString("base64"), ...(sp.say !== spoken ? { speech: sp.say } : {}) });
         } catch (err) {
           if (abort.signal.aborted) return;
           // Degrade gracefully: the client speaks this sentence with its own voice.

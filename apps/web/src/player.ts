@@ -4,6 +4,11 @@ export interface Clip {
   data: ArrayBuffer;
   emotion: Emotion;
   text: string;
+  /** The words actually spoken when they differ from `text` (e.g. Japanese). */
+  speech?: string;
+  turnId?: number;
+  /** Dialog-box line this clip belongs to. */
+  key?: number;
 }
 
 /**
