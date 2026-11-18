@@ -22,5 +22,9 @@
   },
   "devDependencies": {
     "esbuild": "^0.28.2"
+  },
+  "overrides": {
+    "uuid": "^11.1.1",
+    "image-size": "^2.0.4"
   }
 }

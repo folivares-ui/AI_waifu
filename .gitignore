@@ -1,8 +1,11 @@
 node_modules
 dist
 .env
-data/*.json
-data/*.jsonl
+# Everything she keeps about you: memory, action log, document backups, her browser profile (cookies),
+# API keys, voice clips. Never committed.
+data/
+.env.*
+!.env.example
 *.log
 .DS_Store
 

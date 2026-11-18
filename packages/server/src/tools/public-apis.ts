@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { searchCatalog, type ApiEntry } from "./catalog.js";
 import { htmlToText, safeGet, type SafeGetOptions } from "./safe-fetch.js";
-import { untrusted, type Tool } from "./types.js";
+import { describeEgress, untrusted, type Tool } from "./types.js";
 
 /** Per-host credentials kept on the server; the model never sees them. */
 export type KeyConfig = Record<string, { header?: string; query?: string; bearer?: string; value?: string }>;
@@ -83,6 +83,8 @@ export function createPublicApiTools(o: PublicApisOptions): Tool[] {
   };
 
   const readDocs: Tool = {
+    egress: true,
+    describe: (input) => describeEgress("Leer la documentacion de una API en", (input as { url?: string })?.url),
     def: {
       name: "read_api_docs",
       description:
@@ -102,6 +104,11 @@ export function createPublicApiTools(o: PublicApisOptions): Tool[] {
   };
 
   const call: Tool = {
+    egress: true,
+    describe: (input) => {
+      const i = input as { url?: string; query?: Record<string, unknown> };
+      return describeEgress("Consultar la API de", i?.url, i?.query);
+    },
     def: {
       name: "call_api",
       description:

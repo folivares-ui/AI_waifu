@@ -10,7 +10,7 @@ Works today:
 - **Server-side voice pipeline:** mic → echo-cancelled capture → voice-activity detection → WAV → your STT server → LLM → sentence-by-sentence TTS → ordered audio playback. If STT/TTS are not configured, it falls back to the browser's Web Speech API / built-in voices, so nothing breaks.
 - **Barge-in:** talk over her to interrupt (VAD threshold is raised while she speaks, plus a transcript echo filter so she does not answer her own voice). "Callar" cuts audio instantly.
 - Soul file (`souls/default.soul.json`), local long-term memory (`data/memory.json`), swappable brains (Anthropic, Ollama, offline mock).
-- Security: loopback by default, `AUTH_TOKEN` required to expose it, and an Origin allowlist so other websites cannot talk to your localhost server.
+- Security: loopback by default, `AUTH_TOKEN` required to expose it, Host + Origin checks so other websites cannot talk to your localhost server. Full review (Spanish): [docs/SEGURIDAD.md](docs/SEGURIDAD.md).
 
 Also built: installable PWA + server-hosted app with HTTPS/pairing (phase 3), Tauri desktop shell (phase 3), opt-in screen vision (phase 4).
 

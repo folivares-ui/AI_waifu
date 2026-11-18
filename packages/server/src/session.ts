@@ -292,6 +292,9 @@ export class Session {
       const toolDefs = useTools ? this.tools.map((t) => t.def) : [];
       let rounds = 0;
       let calls = 0;
+      // Once she has seen external or private content (a tool result, or the screenshot the user attached),
+      // anything that sends a request to the internet needs approval (see Tool.egress).
+      let tainted = !!opts.image;
       for (let iter = 0; iter < MAX_TOOL_ROUNDS + 2; iter++) {
         const events: AsyncIterable<LLMEvent> =
           toolDefs.length && this.llm.streamWithTools
@@ -351,7 +354,8 @@ export class Session {
             // Actions that change things always go through the user first. Enforced here, not by each tool.
             let denied: string | undefined;
             let info: ApprovalInfo | undefined;
-            if (tool.kind === "write") {
+            const gated = tool.kind === "write" || (tool.egress === true && tainted);
+            if (gated) {
               try {
                 info = (await tool.describe?.(u.input)) ?? { summary: `${u.name} ${JSON.stringify(u.input).slice(0, 300)}` };
               } catch (e) {
@@ -386,6 +390,7 @@ export class Session {
               content = `Error: ${e instanceof Error ? e.message : String(e)}`;
               ok = false;
             }
+            tainted = true;
             if (info) this.actionLog.record({ tool: u.name, summary: info.summary, approved: true, ok, ...(ok ? {} : { error: content }) });
             this.send({ type: "tool", turnId, name: u.name, status: "end", ok });
           }

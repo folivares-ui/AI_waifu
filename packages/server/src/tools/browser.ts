@@ -2,7 +2,7 @@ import { lookup } from "node:dns/promises";
 import net from "node:net";
 import { chromium, type BrowserContext, type Page } from "playwright-core";
 import { isPrivateAddress } from "./safe-fetch.js";
-import { untrusted, type Tool } from "./types.js";
+import { describeEgress, untrusted, type Tool } from "./types.js";
 
 export interface BrowserOptions {
   /** Dedicated profile folder: never the user's own Chrome profile (no history, passwords or cookies of theirs). */
@@ -203,6 +203,8 @@ export function createBrowserTools(b: BrowserController): Tool[] {
 
   const open: Tool = {
     kind: "read",
+    egress: true,
+    describe: (input) => describeEgress("Abrir en su navegador:", (input as { url?: string })?.url),
     def: {
       name: "browser_open",
       description:

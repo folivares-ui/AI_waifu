@@ -103,6 +103,7 @@ describe("Blender in a window", () => {
     const args = readFileSync(log, "utf8");
     expect(args).toMatch(/--python\n.*script\.py\nprint\('cubo'\)/);
     expect(args).not.toMatch(/--background/);
+    expect(args.match(/--disable-autoexec/g)).toHaveLength(2); // both launches: embedded .blend scripts never run
     expect(args).toContain(join(ws.roots[0], "escena.blend"));
   });
 });

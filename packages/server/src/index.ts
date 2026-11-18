@@ -1,4 +1,5 @@
 import "./env.js"; // must stay first: loads .env before other modules read process.env
+import { isLoopbackHost, makeAuthorizer } from "./auth.js";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
@@ -57,14 +58,7 @@ const memory = new MemoryStore(process.env.MEMORY_FILE ?? userPath("data/memory.
 const actionLog = new ActionLog(process.env.ACTIONS_LOG ?? userPath("data/actions.jsonl"));
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 
-function authorized(req: IncomingMessage): boolean {
-  const url = new URL(req.url ?? "", "http://x");
-  const bearer = req.headers.authorization?.replace(/^Bearer\s+/i, "");
-  if (token) return url.searchParams.get("token") === token || bearer === token;
-  const origin = req.headers.origin;
-  return !origin || allowedOrigins.has(origin); // non-browser clients send no Origin
-}
-
+const authorized = makeAuthorizer({ token, allowedOrigins });
 function cors(req: IncomingMessage, res: ServerResponse) {
   const origin = req.headers.origin;
   if (origin && (token || allowedOrigins.has(origin))) {
@@ -99,6 +93,8 @@ const tlsCert = process.env.TLS_CERT;
 const tlsKey = process.env.TLS_KEY;
 const secure = !!(tlsCert && tlsKey);
 const handler = async (req: IncomingMessage, res: ServerResponse) => {
+  // This-PC-only mode: refuse every request (page, API, files) that does not name this computer as its host.
+  if (!token && !isLoopbackHost(req.headers.host)) return json(res, 403, { error: "forbidden host" });
   cors(req, res);
   const path = new URL(req.url ?? "", "http://x").pathname;
   if (req.method === "OPTIONS") return void res.writeHead(204).end();

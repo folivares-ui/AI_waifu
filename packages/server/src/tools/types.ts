@@ -21,6 +21,12 @@ export interface Tool {
    * The session ALWAYS asks the user before running a write tool; tools cannot opt out.
    */
   kind?: "read" | "write";
+  /**
+   * Sends a request to the internet whose address she chooses (opening a page, calling an API). Free while
+   * nothing else has been read in the turn; once she has seen documents, pages, screens or any other tool output,
+   * it needs approval too, so hidden instructions in that content cannot smuggle your data out inside a URL.
+   */
+  egress?: boolean;
   /** Builds the approval card for this call. May validate the input and throw (the error goes to the model). */
   describe?(input: unknown): ApprovalInfo | Promise<ApprovalInfo>;
   /** Throwing is fine: the error text is returned to the model as a tool error. */
@@ -31,6 +37,21 @@ export interface Tool {
 export interface ToolContext {
   /** Asks the connected client for a screenshot. Resolves to undefined if the user is not sharing their screen. */
   requestScreen(signal?: AbortSignal): Promise<ScreenImage | undefined>;
+}
+
+/** Approval card for a request to the internet made after she has read other content in the same answer. */
+export function describeEgress(action: string, rawUrl: unknown, query?: Record<string, unknown>): ApprovalInfo {
+  let url: URL;
+  try {
+    url = new URL(String(rawUrl ?? ""));
+  } catch {
+    throw new Error("A full http(s) URL is required.");
+  }
+  for (const [k, v] of Object.entries(query ?? {})) url.searchParams.set(k, String(v));
+  return {
+    summary: `${action} ${url.hostname}`,
+    details: `${url.href}\n\nRice ya leyo otro contenido en esta respuesta (documentos, paginas o la pantalla). Revisa que la direccion no lleve datos tuyos antes de permitirlo.`,
+  };
 }
 
 /** Wraps external content so the model treats it as data, never as instructions from the user. */

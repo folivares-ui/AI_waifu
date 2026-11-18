@@ -198,7 +198,8 @@ export function createBlenderTools(ws: Workspace, env: NodeJS.ProcessEnv = proce
         const dir = await mkdtemp(join(tmpdir(), "waifu-blender-"));
         const script = join(dir, "script.py");
         await writeFile(script, i.script);
-        await launchDetached(bin(), [...(i.blend_file ? [blendPath(i.blend_file)] : []), "--python", script], ws.roots[0]);
+        // --disable-autoexec: scripts embedded in the .blend never run, even if auto-run was enabled in Preferences.
+        await launchDetached(bin(), ["--disable-autoexec", ...(i.blend_file ? [blendPath(i.blend_file)] : []), "--python", script], ws.roots[0]);
         setTimeout(() => void rm(dir, { recursive: true, force: true }), 120_000).unref(); // Blender has read it by then
         return "Blender is open and running the script in its window.";
       }
@@ -227,7 +228,7 @@ export function createBlenderTools(ws: Workspace, env: NodeJS.ProcessEnv = proce
     async run(input) {
       const path = (input as { path?: string })?.path;
       const real = path ? blendPath(path) : undefined;
-      await launchDetached(bin(), real ? [real] : [], ws.roots[0]);
+      await launchDetached(bin(), ["--disable-autoexec", ...(real ? [real] : [])], ws.roots[0]);
       return `Blender is open${real ? ` with ${ws.display(real)}` : ""}.`;
     },
   };
@@ -238,9 +239,9 @@ export function createBlenderTools(ws: Workspace, env: NodeJS.ProcessEnv = proce
 // ---------- opening files with their program ---------------------------------------------------------------------
 
 /** Opened with the program the user has for them (Word, Excel, a PDF viewer...). Never executables or scripts. */
-const DOC_EXTS = new Set([".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".pdf", ".txt", ".md", ".csv", ".rtf", ".odt", ".ods", ".odp", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".mp3", ".wav", ".ogg", ".flac", ".mp4", ".mov", ".mkv", ".avi", ".webm"]);
+const DOC_EXTS = new Set([".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".pdf", ".txt", ".md", ".csv", ".rtf", ".odt", ".ods", ".odp", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".mp3", ".wav", ".ogg", ".flac", ".mp4", ".mov", ".mkv", ".avi", ".webm"]);
 /** Code is shown in VS Code: opening it "with its program" could run it. */
-const CODE_EXTS = new Set([".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".html", ".htm", ".css", ".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".sql", ".sh", ".ps1", ".bat", ".cmd", ".c", ".cpp", ".h", ".hpp", ".cs", ".java", ".go", ".rs", ".php", ".rb", ".lua", ".kt", ".swift", ".dart", ".vue", ".svelte"]);
+const CODE_EXTS = new Set([".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".html", ".htm", ".css", ".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".sql", ".sh", ".ps1", ".bat", ".cmd", ".c", ".cpp", ".h", ".hpp", ".cs", ".java", ".go", ".rs", ".php", ".rb", ".lua", ".kt", ".swift", ".dart", ".vue", ".svelte", ".svg"]); // .svg can contain scripts: shown as text
 
 export function defaultOpener(platform = process.platform, env: NodeJS.ProcessEnv = process.env): (path: string) => Promise<void> {
   if (platform === "win32") {
