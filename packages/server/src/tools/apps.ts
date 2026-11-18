@@ -40,6 +40,18 @@ export function runProgram(bin: string, args: string[], opts: { cwd?: string; ti
   });
 }
 
+/** Starts a desktop program for the user to see, without waiting for it (it keeps running after this call). */
+export function launchDetached(bin: string, args: string[], cwd?: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const p = spawn(bin, args, { cwd, env: cwd ? { ...process.env, PWD: cwd } : process.env, shell: false, detached: true, stdio: "ignore", windowsHide: false });
+    p.once("error", reject);
+    p.once("spawn", () => {
+      p.unref();
+      resolve();
+    });
+  });
+}
+
 // ---------- VS Code ---------------------------------------------------------------------------------------------
 
 /**
@@ -164,22 +176,32 @@ export function createBlenderTools(ws: Workspace, env: NodeJS.ProcessEnv = proce
         properties: {
           script: { type: "string", description: "Python code using bpy" },
           blend_file: { type: "string", description: "Optional .blend file to open first" },
+          in_window: { type: "boolean", description: "Open Blender visibly and run the script there, so the user sees the result (default: run in the background)" },
           timeout_s: { type: "integer", minimum: 5, maximum: 1800 },
         },
         required: ["script"],
       },
     },
     describe(input) {
-      const i = input as { script?: string; blend_file?: string };
+      const i = input as { script?: string; blend_file?: string; in_window?: boolean };
       if (typeof i?.script !== "string" || !i.script.trim()) throw new Error("script is required.");
       const file = i.blend_file ? ws.display(blendPath(i.blend_file)) : undefined;
       return {
-        summary: `Ejecutar un script de Python en Blender${file ? ` sobre ${file}` : ""} (un script puede hacer cualquier cosa en tu equipo: revisalo)`,
+        summary: `${i.in_window ? "Abrir Blender y ejecutar" : "Ejecutar"} un script de Python${file ? ` sobre ${file}` : ""} (un script puede hacer cualquier cosa en tu equipo: revisalo)`,
         details: i.script,
       };
     },
     async run(input, signal) {
-      const i = input as { script: string; blend_file?: string; timeout_s?: number };
+      const i = input as { script: string; blend_file?: string; timeout_s?: number; in_window?: boolean };
+      if (i.in_window) {
+        // Visible Blender: the user watches the script build the scene and keeps working in it.
+        const dir = await mkdtemp(join(tmpdir(), "waifu-blender-"));
+        const script = join(dir, "script.py");
+        await writeFile(script, i.script);
+        await launchDetached(bin(), [...(i.blend_file ? [blendPath(i.blend_file)] : []), "--python", script], ws.roots[0]);
+        setTimeout(() => void rm(dir, { recursive: true, force: true }), 120_000).unref(); // Blender has read it by then
+        return "Blender is open and running the script in its window.";
+      }
       const dir = await mkdtemp(join(tmpdir(), "waifu-blender-"));
       try {
         const script = join(dir, "script.py");
@@ -195,5 +217,65 @@ export function createBlenderTools(ws: Workspace, env: NodeJS.ProcessEnv = proce
     },
   };
 
-  return [inspect, run];
+  const open: Tool = {
+    kind: "read",
+    def: {
+      name: "blender_open",
+      description: "Open Blender visibly for the user, with a .blend file from the workspace or an empty scene (to model or animate, use blender_run_script with in_window).",
+      input_schema: { type: "object", properties: { path: { type: "string" } } },
+    },
+    async run(input) {
+      const path = (input as { path?: string })?.path;
+      const real = path ? blendPath(path) : undefined;
+      await launchDetached(bin(), real ? [real] : [], ws.roots[0]);
+      return `Blender is open${real ? ` with ${ws.display(real)}` : ""}.`;
+    },
+  };
+
+  return [inspect, run, open];
+}
+
+// ---------- opening files with their program ---------------------------------------------------------------------
+
+/** Opened with the program the user has for them (Word, Excel, a PDF viewer...). Never executables or scripts. */
+const DOC_EXTS = new Set([".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".pdf", ".txt", ".md", ".csv", ".rtf", ".odt", ".ods", ".odp", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".mp3", ".wav", ".ogg", ".flac", ".mp4", ".mov", ".mkv", ".avi", ".webm"]);
+/** Code is shown in VS Code: opening it "with its program" could run it. */
+const CODE_EXTS = new Set([".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".html", ".htm", ".css", ".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".sql", ".sh", ".ps1", ".bat", ".cmd", ".c", ".cpp", ".h", ".hpp", ".cs", ".java", ".go", ".rs", ".php", ".rb", ".lua", ".kt", ".swift", ".dart", ".vue", ".svelte"]);
+
+export function defaultOpener(platform = process.platform, env: NodeJS.ProcessEnv = process.env): (path: string) => Promise<void> {
+  if (platform === "win32") {
+    return async (path) => {
+      if (CMD_META.test(path)) throw new Error("This path contains characters that cannot be passed safely on Windows; rename it or open it by hand.");
+      await launchDetached(env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", `start "" "${path}"`]);
+    };
+  }
+  return (path) => launchDetached(platform === "darwin" ? "open" : "xdg-open", [path]);
+}
+
+export function createOpenFileTool(ws: Workspace, opts: { opener?: (path: string) => Promise<void>; openCode?: (path: string) => Promise<string>; openBlend?: (path: string) => Promise<string> } = {}): Tool {
+  const opener = opts.opener ?? defaultOpener();
+  return {
+    kind: "read", // only shows the file to the user; any change still goes through an approval card
+    def: {
+      name: "open_file",
+      description:
+        "Open a file for the user in its program: documents in Word/Excel/PowerPoint/PDF viewer, images, audio/video; code files in VS Code; .blend files in Blender. Use find_files to locate a file by name. Executables and scripts are never run. Note: a document that is open in Word/Excel cannot be edited with the file tools until the user closes it.",
+      input_schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+    },
+    async run(input) {
+      const real = ws.resolve(String((input as { path?: string })?.path ?? ""), { mustExist: true });
+      const ext = extname(real).toLowerCase();
+      if (ext === ".blend") {
+        if (!opts.openBlend) throw new Error("Blender is not enabled (TOOLS=blender).");
+        return opts.openBlend(real);
+      }
+      if (CODE_EXTS.has(ext)) {
+        if (!opts.openCode) throw new Error("Code files open in VS Code, which is not enabled (TOOLS=vscode).");
+        return opts.openCode(real);
+      }
+      if (!DOC_EXTS.has(ext)) throw new Error(`For safety, "${ext || "this type of"}" files are not opened (no executables, scripts or shortcuts).`);
+      await opener(real);
+      return `Opened ${ws.display(real)} for the user.`;
+    },
+  };
 }

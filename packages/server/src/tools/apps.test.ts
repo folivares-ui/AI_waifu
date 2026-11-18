@@ -80,7 +80,8 @@ try {
     expect(run.kind).toBe("write");
     expect(inspect.kind).toBe("read");
     const info = await run.describe!({ script: "import bpy\nprint('hi')" });
-    expect(info.summary).toMatch(/script de Python en Blender .*revisalo/);
+    expect(info.summary).toMatch(/^Ejecutar un script de Python .*revisalo/);
+    expect((await run.describe!({ script: "x", in_window: true })).summary).toMatch(/^Abrir Blender y ejecutar/);
     expect(info.details).toBe("import bpy\nprint('hi')");
     expect(() => run.describe!({ script: " " })).toThrow(/required/);
   });

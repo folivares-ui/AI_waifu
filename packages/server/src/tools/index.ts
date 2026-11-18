@@ -4,7 +4,8 @@ import { loadCatalog } from "./catalog.js";
 import { createPublicApiTools, loadKeys } from "./public-apis.js";
 import { homedir } from "node:os";
 import { delimiter } from "node:path";
-import { createBlenderTools, createVSCodeTools } from "./apps.js";
+import { existsSync } from "node:fs";
+import { createBlenderTools, createOpenFileTool, createVSCodeTools } from "./apps.js";
 import { BrowserController, createBrowserTools } from "./browser.js";
 import { DesktopClient, createDesktopTools } from "./desktop.js";
 import { createFileTools } from "./files.js";
@@ -24,6 +25,16 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
  */
 /** Closed when the server stops. */
 export let browserForShutdown: BrowserController | undefined;
+let workspaceForLifecycle: Workspace | undefined;
+
+/**
+ * She only acts on other programs while this app is open: when the last window/client goes away, her own Chrome
+ * window is closed and every one-off file permission is withdrawn. (Turns in progress are cancelled by the session.)
+ */
+export async function onAllClientsGone() {
+  workspaceForLifecycle?.clearGrants();
+  await browserForShutdown?.close();
+}
 
 export function createToolFactory(env: NodeJS.ProcessEnv = process.env): ((ctx: ToolContext) => Tool[]) | undefined {
   const enabled = (env.TOOLS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -67,13 +78,29 @@ export function createToolFactory(env: NodeJS.ProcessEnv = process.env): ((ctx: 
     } else console.warn("[tools] desktop control requested, but the server was not started by the desktop app: skipped");
   }
   if (enabled.includes("screen")) console.log("[tools] screen enabled: she can look at your screen only while you share it in the client");
+  workspaceForLifecycle = workspace;
+  // Usual places where the user keeps files, for find_files (names only; using them still needs approval).
+  const home = homedir();
+  const searchDirs = (env.SEARCH_DIRS ? env.SEARCH_DIRS.split(delimiter) : ["Documents", "Desktop", "Downloads", "OneDrive/Documents", "OneDrive/Desktop", "Documentos", "Escritorio", "Descargas"].map((d) => resolve(home, d)))
+    .map((d) => d.trim())
+    .filter((d) => d && existsSync(d));
   return (ctx) => [
     ...(apis ? createPublicApiTools({ entries: apis.entries, keys: apis.keys, log: (m) => console.log(`[tools] ${m}`) }) : []),
     ...(enabled.includes("screen") ? [createScreenTool(ctx)] : []),
-    ...(workspace ? createFileTools(workspace) : []),
+    ...(workspace ? createFileTools(workspace, searchDirs) : []),
     ...(browser ? createBrowserTools(browser) : []),
     ...(desktop ? createDesktopTools(desktop) : []),
     ...(workspace && enabled.includes("vscode") ? createVSCodeTools(workspace) : []),
     ...(workspace && enabled.includes("blender") ? createBlenderTools(workspace) : []),
+    ...(workspace ? [openFileTool(workspace, enabled)] : []),
   ];
+}
+
+/** open_file routes code to VS Code and .blend files to Blender when those tools are enabled. */
+function openFileTool(ws: Workspace, enabled: string[]): Tool {
+  const viaTool = (tools: Tool[], name: string) => async (path: string) => String(await tools.find((t) => t.def.name === name)!.run({ path }));
+  return createOpenFileTool(ws, {
+    openCode: enabled.includes("vscode") ? viaTool(createVSCodeTools(ws), "vscode_open") : undefined,
+    openBlend: enabled.includes("blender") ? viaTool(createBlenderTools(ws), "blender_open") : undefined,
+  });
 }

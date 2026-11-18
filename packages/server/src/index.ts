@@ -13,7 +13,7 @@ import { MemoryStore } from "./memory.js";
 import { Session } from "./session.js";
 import { loadSoul, sttHint } from "./soul.js";
 import { createStaticHandler } from "./static.js";
-import { browserForShutdown, createToolFactory } from "./tools/index.js";
+import { browserForShutdown, createToolFactory, onAllClientsGone } from "./tools/index.js";
 import { createSTT } from "./stt/index.js";
 import { createTTS } from "./tts/index.js";
 
@@ -113,7 +113,11 @@ const http = secure
   : createHttpServer(handler);
 
 const wss = new WebSocketServer({ server: http, path: "/ws", maxPayload: 3 * 1024 * 1024 /* screenshots */, verifyClient: ({ req }: { req: IncomingMessage }) => authorized(req) });
+let clients = 0;
+let goneTimer: NodeJS.Timeout | undefined;
 wss.on("connection", (ws) => {
+  clients++;
+  clearTimeout(goneTimer);
   const session = new Session(soul, llm, memory, (m) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m)), { tts, caps, tools: makeTools, watchMinIntervalMs: Number(process.env.WATCH_MIN_INTERVAL_MS ?? 25000), actionLog, approvalTimeoutMs: Number(process.env.APPROVAL_TIMEOUT_MS ?? 120000) });
   session.hello();
   ws.on("message", (data) => {
@@ -123,7 +127,12 @@ wss.on("connection", (ws) => {
       ws.send(JSON.stringify({ type: "error", message: "bad message" }));
     }
   });
-  ws.on("close", () => session.close());
+  ws.on("close", () => {
+    session.close();
+    clients--;
+    // A few seconds of grace so a page reload does not close her browser.
+    if (clients === 0) goneTimer = setTimeout(() => void onAllClientsGone().then(() => console.log("[app] no window open: her browser closed, file permissions withdrawn")), 5000);
+  });
 });
 
 // When launched by the desktop shell, die with it even if it crashes or is killed (no orphan servers).

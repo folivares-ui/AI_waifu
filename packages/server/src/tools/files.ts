@@ -1,6 +1,7 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { extname } from "node:path";
+import { basename, extname, isAbsolute, join } from "node:path";
+import { Workspace as WorkspaceClass } from "./workspace.js";
 import { TEXT_EXTS, applyXlsxUpdate, buildDocument, docxReplace, lineDiff, planXlsxUpdate, readDocument, type CellUpdate, type NewDocument } from "./documents.js";
 import { untrusted, type Tool } from "./types.js";
 import type { Workspace } from "./workspace.js";
@@ -30,7 +31,46 @@ const str = (v: unknown, what: string) => {
  * Document tools over the user's workspace folders: list/read are free, every change asks first,
  * shows exactly what will change, and keeps a backup copy of the previous version.
  */
-export function createFileTools(ws: Workspace): Tool[] {
+const fold = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const SKIP_DIRS = /^(node_modules|appdata|\$recycle\.bin|system volume information|library|\..*)$/i;
+
+/** Finds files whose name contains all the words of `query`, newest first (bounded walk, names only). */
+export function findFiles(dirs: string[], query: string, opts = { maxDepth: 6, maxDirs: 4000, limit: 25 }): { path: string; size: number; mtime: Date }[] {
+  const words = fold(query).split(/[^a-z0-9.]+/).filter(Boolean);
+  if (!words.length) throw new Error("Give part of the file name to look for.");
+  const hits: { path: string; size: number; mtime: Date }[] = [];
+  let seen = 0;
+  const queue = dirs.filter((d) => existsSync(d)).map((d) => ({ d, depth: 0 }));
+  const visited = new Set<string>();
+  while (queue.length && seen < opts.maxDirs) {
+    const { d, depth } = queue.shift()!;
+    if (visited.has(d)) continue;
+    visited.add(d);
+    seen++;
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = readdirSync(d, { withFileTypes: true });
+    } catch {
+      continue; // no permission
+    }
+    for (const e of entries) {
+      const full = join(d, e.name);
+      if (e.isDirectory()) {
+        if (depth < opts.maxDepth && !SKIP_DIRS.test(e.name) && !e.isSymbolicLink()) queue.push({ d: full, depth: depth + 1 });
+      } else if (e.isFile() && words.every((w) => fold(e.name).includes(w))) {
+        try {
+          const st = statSync(full);
+          hits.push({ path: full, size: st.size, mtime: st.mtime });
+        } catch {
+          /* vanished */
+        }
+      }
+    }
+  }
+  return hits.sort((a, b) => b.mtime.getTime() - a.mtime.getTime()).slice(0, opts.limit);
+}
+
+export function createFileTools(ws: Workspace, searchDirs: string[] = []): Tool[] {
   const listFiles: Tool = {
     kind: "read",
     def: {
@@ -194,5 +234,43 @@ export function createFileTools(ws: Workspace): Tool[] {
     },
   };
 
-  return [listFiles, readDoc, writeText, excel, word, create];
+  const find: Tool = {
+    kind: "read",
+    def: {
+      name: "find_files",
+      description:
+        "Find files by (part of) their name in the user's workspace and usual folders (Documents, Desktop, Downloads). Returns full paths, newest first. To use a result outside the workspace, call request_file_access first.",
+      input_schema: { type: "object", properties: { name: { type: "string", description: "e.g. 'informe ventas' or 'tesis.docx'" } }, required: ["name"] },
+    },
+    async run(input) {
+      const hits = findFiles([...ws.roots, ...searchDirs], str((input as { name?: string })?.name, "name"));
+      if (!hits.length) return "No files found with that name. Ask the user for the full path.";
+      return hits.map((h) => `${h.path}  (${Math.ceil(h.size / 1024)} KB, ${h.mtime.toISOString().slice(0, 10)})`).join("\n");
+    },
+  };
+
+  const access: Tool = {
+    kind: "write",
+    def: {
+      name: "request_file_access",
+      description:
+        "Ask the user for permission to use a specific file or folder OUTSIDE the workspace (full path, e.g. one they mentioned or one found with find_files). After they approve, you can read, edit and open it while the app stays open.",
+      input_schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+    },
+    describe(input) {
+      const p = str((input as { path?: string })?.path, "path");
+      if (!isAbsolute(p)) throw new Error("Give the full path (e.g. C:\\Users\\...\\file.docx).");
+      if (!existsSync(p)) throw new Error(`Nothing exists at ${p}.`);
+      const why = WorkspaceClass.forbidden(p);
+      if (why) throw new Error(`Access to "${p}" is not allowed: it is ${why}.`);
+      const folder = statSync(p).isDirectory();
+      return { summary: `Permitir que use ${folder ? "la carpeta" : "el archivo"} «${basename(p)}» (leer y editar, solo mientras la app este abierta)`, details: p };
+    },
+    async run(input) {
+      const real = ws.grant(str((input as { path?: string })?.path, "path"));
+      return `Access granted to ${real} until the app is closed.`;
+    },
+  };
+
+  return [listFiles, readDoc, writeText, excel, word, create, find, access];
 }

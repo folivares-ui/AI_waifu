@@ -138,6 +138,8 @@ describe("file tools", () => {
       excel_update_cells: "write",
       word_replace_text: "write",
       create_document: "write",
+      find_files: "read",
+      request_file_access: "write",
     });
   });
 

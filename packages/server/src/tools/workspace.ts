@@ -1,8 +1,21 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 
 const caseInsensitive = process.platform === "win32" || process.platform === "darwin";
 const norm = (p: string) => (caseInsensitive ? p.toLowerCase() : p);
+
+/** Places she must never be granted, even if asked (system files, programs, app data, keys). */
+const FORBIDDEN = [
+  /^[a-z]:\\windows(\\|$)/i,
+  /^[a-z]:\\program files( \(x86\))?(\\|$)/i,
+  /^[a-z]:\\programdata(\\|$)/i,
+  /[\\/]appdata([\\/]|$)/i,
+  /[\\/]\.(ssh|gnupg|aws|azure|kube|config|docker)([\\/]|$)/i,
+  /^\/(etc|bin|sbin|usr|boot|dev|proc|sys|var|lib|opt|root)(\/|$)/,
+  /^\/(System|Library|Applications|private)(\/|$)/,
+  /[\\/]library[\\/](keychains|application support)([\\/]|$)/i,
+];
 
 /**
  * The folders she may read and change. Every path is resolved through the real filesystem (symlinks, junctions,
@@ -10,6 +23,8 @@ const norm = (p: string) => (caseInsensitive ? p.toLowerCase() : p);
  */
 export class Workspace {
   readonly roots: string[];
+  /** Extra files/folders the user approved for this run of the app (cleared when the app closes). */
+  private grants = new Set<string>();
 
   constructor(
     roots: string[],
@@ -23,11 +38,34 @@ export class Workspace {
     });
   }
 
+  /** Is this path one she must never touch, whatever the user grants? */
+  static forbidden(real: string): string | undefined {
+    const home = homedir();
+    if (real === parse(real).root || norm(real) === norm(home)) return "a whole drive or your whole user folder";
+    if (FORBIDDEN.some((r) => r.test(real))) return "a system, program or private configuration location";
+    return undefined;
+  }
+
+  /** Lets her use a file or folder outside the workspace (only after the user approved it). */
+  grant(p: string): string {
+    const real = existsSync(p) ? realpathSync(p) : resolve(p);
+    const why = Workspace.forbidden(real);
+    if (why) throw new Error(`Access to "${p}" is not allowed: it is ${why}.`);
+    this.grants.add(real);
+    return real;
+  }
+
+  clearGrants() {
+    this.grants.clear();
+  }
+
   private inside(real: string): boolean {
-    return this.roots.some((root) => {
+    const within = (root: string) => {
       const rel = relative(norm(root), norm(real));
       return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel) && !rel.startsWith(sep));
-    });
+    };
+    // Folders configured by the user are trusted; one-off grants never reach system/private locations.
+    return this.roots.some(within) || (!Workspace.forbidden(real) && [...this.grants].some(within));
   }
 
   /**
@@ -54,7 +92,9 @@ export class Workspace {
       real = join(realpathSync(existing), ...missing);
     }
     if (!this.inside(real)) {
-      throw new Error(`"${p}" is outside the folders she is allowed to use (${this.roots.join(", ")}).`);
+      throw new Error(
+        `"${p}" is outside the folders she is allowed to use (${this.roots.join(", ")}). If the user asked for this file, call request_file_access with its full path so they can approve it.`,
+      );
     }
     return real;
   }

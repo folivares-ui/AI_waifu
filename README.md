@@ -77,11 +77,13 @@ Enable what you want with `TOOLS=` (comma separated). Reading and looking never 
 |---|---|---|
 | `files` | List and read Word, Excel (cells + formulas), PowerPoint (text + notes), PDF, text/code in your workspace folders (`WORKSPACE_DIRS`, default `Documents/AiWaifu`); edit Excel cells, replace text in Word keeping formatting, create .docx/.xlsx/.pptx, write text/code files | every change (a backup copy is saved in `data/backups` first) |
 | `browser` | Open and read web pages in **her own Chrome window and profile** (no access to your history, passwords or logins); also Canva web | clicks and typing; she never fills password/payment fields; local network addresses are blocked |
-| `vscode` | Open workspace files at a line in VS Code (code edits go through `files`) | — |
-| `blender` | Summarise .blend files (scripts embedded in them are never run); run bpy scripts | every script (shown in full) |
+| `vscode` | Open workspace files at a line in VS Code (code edits go through `files`). When you ask her to program something she writes the files and opens them here | — |
+| `blender` | Summarise .blend files (scripts embedded in them are never run); open Blender with a file; run bpy scripts in the background or **in a visible Blender window** (for models/animations you want to keep working on) | every script (shown in full) |
+| (with `files`) | `find_files`: find a file by (part of) its name in Documents/Desktop/Downloads/OneDrive (or `SEARCH_DIRS`); `open_file`: open a document with its program, code in VS Code, `.blend` in Blender (never executables, scripts or shortcuts); `request_file_access`: use a file/folder outside the workspace | access outside the workspace (system, program and private-config folders are always refused) |
 | `desktop` | See the whole screen and click/type/press keys in **any** app (Lightworks, Inventor, Office...) — desktop app only | every click, text and key combo |
 
 Notes and limits:
+- **She only acts while the app is open.** Nothing runs in the background: when the last window closes, the access you granted to extra folders is forgotten and her browser window is closed. Approvals are never remembered between runs.
 - Documents are edited as **files**: close a document in Word/Excel before she changes it (Windows locks open files; she will tell you). Workbooks with charts, pivot tables or macros are refused because this method would lose them. Editing documents while they are open (Office automation through COM) is not implemented yet.
 - `desktop` is the universal fallback but slower and less precise than the specific tools: she has to look, act, and look again. Prefer `files`/`browser` when they fit.
 - Everything she reads (documents, pages, screens) is treated as untrusted data: instructions found there are not followed.
