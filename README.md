@@ -30,7 +30,7 @@ npm install
 copy .env.example .env   # Windows;  macOS/Linux: cp .env.example .env
 ```
 Then open `.env` in a text editor. The server reads it by itself every time it starts. The most useful lines:
-- Brain: `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY=...`, or `LLM_PROVIDER=ollama` + `OLLAMA_MODEL=...` (local). With `mock` she only gives canned demo answers.
+- Brain: `LLM_PROVIDER=ollama` (free, runs on your PC: install Ollama, then `ollama pull qwen2.5:3b`) or `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY=...` (paid, smarter). Both can use the program tools. With `mock` she only gives canned demo answers.
 - Rice's voice: `TTS_PROVIDER=voicestudio` and `STT_PROVIDER=voicestudio` (open VoiceStudio and create her voice once, see below).
 - Programs: `TOOLS=files,browser,vscode,blender` (add `desktop` only in the desktop app). Every change still asks you first.
 - Your 3D model: copy it to `apps/web/public/avatars/default.vrm`.

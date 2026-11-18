@@ -16,7 +16,7 @@ Voice chat, avatar, soul file, memory, swappable LLM.
 - [ ] Persist a user-loaded VRM across reloads (currently only `public/avatars/default.vrm` persists).
 
 ## Phase 2.5 — Public APIs (DONE, see README)
-- [x] Catalog + read-only tools with SSRF/injection protections. [ ] Tool support for Ollama. [ ] Per-API usage hints/curated adapters for the most useful ones. [ ] Confirmation step before APIs that would need writes (none today: GET only).
+- [x] Catalog + read-only tools with SSRF/injection protections. [x] Tool support for Ollama (native tool calling; tested against a fake server only). [ ] Per-API usage hints/curated adapters for the most useful ones. [ ] Confirmation step before APIs that would need writes (none today: GET only).
 
 ## Phase 3 — Desktop app + remote access (DONE, with caveats)
 - [x] Server serves the web app; HTTPS option, token auth, pairing link/QR; installable PWA (manifest, icons, offline shell).
