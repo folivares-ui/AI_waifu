@@ -146,9 +146,33 @@ export class VoiceStudioTTS extends OpenAICompatibleTTS {
     return this.vs.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
   }
 
+  /** One sentence at a time: a home GPU usually has a single worker and refuses extra work (HTTP 429). */
+  private queue: Promise<unknown> = Promise.resolve();
+  /** Waits between retries when VoiceStudio says it is busy (overridable in tests). */
+  retryDelaysMs = [400, 800, 1500, 2500, 4000, 6000];
+
   async synthesize(text: string, opts: TTSOptions, signal?: AbortSignal): Promise<TTSResult> {
     const voice = await this.resolveVoice(opts.voice ?? this.vs.voice);
-    return super.synthesize(text, { ...opts, voice }, signal);
+    const job = this.queue.then(() => this.withRetry(() => super.synthesize(text, { ...opts, voice }, signal), signal));
+    this.queue = job.catch(() => {}); // a failed sentence must not block the next ones
+    return job;
+  }
+
+  /** "429 / busy" from VoiceStudio means nothing was started and it is safe to try again shortly. */
+  private async withRetry<T>(run: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      if (signal?.aborted) throw new Error("aborted");
+      try {
+        return await run();
+      } catch (e) {
+        const busy = e instanceof Error && /^TTS (429|503)\b/.test(e.message);
+        if (!busy || attempt >= this.retryDelaysMs.length || signal?.aborted) throw e;
+        await new Promise<void>((resolve) => {
+          const t = setTimeout(resolve, this.retryDelaysMs[attempt]);
+          signal?.addEventListener("abort", () => (clearTimeout(t), resolve()), { once: true });
+        });
+      }
+    }
   }
 }
 

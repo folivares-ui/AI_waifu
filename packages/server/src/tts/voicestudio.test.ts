@@ -68,3 +68,48 @@ describe("creating Rice's voice automatically", () => {
     expect(await new VoiceStudioTTS(base).ensureProfile("Rice Shower", wav)).toEqual({ status: "unreachable" });
   });
 });
+
+describe("a busy GPU (HTTP 429)", () => {
+  it("sends one sentence at a time and retries when VoiceStudio is busy, keeping every sentence", async () => {
+    let running = 0;
+    let maxRunning = 0;
+    let refusals = 0;
+    const said: string[] = [];
+    const srv = createServer((req, res) => {
+      if (req.url === "/profiles") return void res.writeHead(404).end();
+      let b = "";
+      req.on("data", (c) => (b += c)).on("end", () => {
+        const { input } = JSON.parse(b);
+        if (refusals < 2 && input === "dos") {
+          refusals++;
+          return void res.writeHead(429, { "content-type": "application/json" }).end('{"error":{"message":"the local GPU worker pool is saturated"}}');
+        }
+        running++;
+        maxRunning = Math.max(maxRunning, running);
+        setTimeout(() => {
+          running--;
+          said.push(input);
+          res.writeHead(200).end("RIFF");
+        }, 30);
+      });
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const port = (srv.address() as { port: number }).port;
+    const t = new VoiceStudioTTS({ ...base, baseUrl: `http://127.0.0.1:${port}/v1` });
+    t.retryDelaysMs = [10, 10, 10];
+    const all = await Promise.allSettled(["uno", "dos", "tres"].map((x) => t.synthesize(x, {})));
+    srv.close();
+    expect(all.map((r) => r.status)).toEqual(["fulfilled", "fulfilled", "fulfilled"]);
+    expect(maxRunning).toBe(1);
+    expect(refusals).toBe(2);
+    expect(said).toEqual(["uno", "dos", "tres"]);
+  });
+  it("gives up after the retries and reports the error (that sentence uses the browser voice)", async () => {
+    const srv = createServer((req, res) => (req.url === "/profiles" ? res.writeHead(404).end() : res.writeHead(429).end("busy")));
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const t = new VoiceStudioTTS({ ...base, baseUrl: `http://127.0.0.1:${(srv.address() as { port: number }).port}/v1` });
+    t.retryDelaysMs = [5, 5];
+    await expect(t.synthesize("x", {})).rejects.toThrow(/TTS 429/);
+    srv.close();
+  });
+});
