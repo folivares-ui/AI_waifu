@@ -79,7 +79,7 @@ At startup the server prints a pairing link (and a QR code) such as `https://192
 
 What the installer contains: the window, Node.js, the server, the web app (with your `default.vrm` and the gesture model if they were in the project when you built it), the souls and an example settings file. What it does **not** contain: your `.env` (API keys), memory, logs or voice clips. On the first run it creates its own settings file and opens it in Notepad: `%APPDATA%\dev.waifu.companion\.env` (memory, backups and logs are kept in that folder too). Change it, then close and reopen the app. Ollama, VoiceStudio, VS Code, Blender and Chrome are separate programs: install them yourself if you use them.
 
-Disk space: Build Tools + Rust + the build need several GB (roughly 8–10 GB; check before installing). The installer itself is roughly 50–60 MB.
+Disk space: Build Tools + Rust + the build need several GB (roughly 8–10 GB; check before installing). The installer itself is roughly 60–80 MB (the Linux test package was 69 MB).
 
 If you prefer the light version (window only, using this project folder and your Node.js): `npm run build && npm run build -w @waifu/desktop`.
 
