@@ -80,6 +80,8 @@ export class Session {
   private proactiveTurns = 0;
   private abort?: AbortController;
   private busy = false;
+  /** Last voice-engine error shown, so the same problem is reported once, not after every sentence. */
+  private lastTtsError?: { message: string; at: number };
   private lastWatch = 0;
   private lastReaction = -Infinity;
   private reactionMin: number;
@@ -257,7 +259,10 @@ export class Session {
         } catch (err) {
           if (abort.signal.aborted) return;
           // Degrade gracefully: the client speaks this sentence with its own voice.
-          this.send({ type: "error", message: `TTS fallo: ${err instanceof Error ? err.message : err}` });
+          const message = `La voz de ${this.soul.name} no esta disponible, se usa la del navegador. ${err instanceof Error ? err.message : err}`;
+          const last = this.lastTtsError;
+          if (!last || last.message !== message || Date.now() - last.at > 5 * 60_000) this.send({ type: "error", message });
+          this.lastTtsError = { message, at: Date.now() };
           this.send({ type: "sentence", turnId, text, emotion });
         }
       });

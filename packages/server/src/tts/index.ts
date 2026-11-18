@@ -6,7 +6,10 @@ import { join } from "node:path";
 /** Turns Node's bare "fetch failed" into something a person can act on. */
 export function reachError(url: string, e: unknown): Error {
   const code = (e as { cause?: { code?: string } })?.cause?.code;
-  return new Error(`cannot reach ${new URL(url).origin}${code ? ` (${code})` : ""}: is the voice server (e.g. VoiceStudio) running?`);
+  return new Error(
+    `cannot reach ${new URL(url).origin}${code ? ` (${code})` : ""}: is the voice server (e.g. VoiceStudio) running? ` +
+      `(No se pudo conectar con el programa de voz: abre VoiceStudio, o pon TTS_PROVIDER=none y STT_PROVIDER=none en el .env para usar la voz del navegador.)`,
+  );
 }
 
 export interface TTSOptions {
