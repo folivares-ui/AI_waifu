@@ -34,7 +34,9 @@ Voice chat, avatar, soul file, memory, swappable LLM.
 - [x] Approval cards for every action + action log; read-only work needs no approval.
 - [x] Documents as files: Word, Excel, PowerPoint, PDF, text/code (workspace sandbox, backups).
 - [x] Chrome in a separate profile (Canva web included).
-- [x] VS Code (open at line) and Blender (inspect, run scripts).
+- [x] VS Code (open at line) and Blender (inspect, open, run scripts in the background or in a visible window).
+- [x] Find files by name, open them with the right program, approved access outside the workspace; nothing acts once the app is closed.
+- [x] Character interaction: cursor petting by body region, opt-in camera hand gestures (on-device MediaPipe).
 - [x] General screen control from the desktop app (screenshot + mouse/keyboard), tested on Linux/X11.
 - [ ] Live Office automation on Windows (COM) for documents that are open, and charts/pivots.
 - [ ] Autodesk Inventor API (COM, Windows), Lightworks: currently only through general screen control.

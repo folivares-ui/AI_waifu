@@ -14,22 +14,38 @@ Works today:
 
 Also built: installable PWA + server-hosted app with HTTPS/pairing (phase 3), Tauri desktop shell (phase 3), opt-in screen vision (phase 4).
 
-Not built yet (see [docs/ROADMAP.md](docs/ROADMAP.md)): desktop/app control (Word, Excel, Blender...), games, streaming, standalone installers that bundle the server, native app-store mobile builds.
+Also built: app control with approval cards (phase 5), Rice Shower soul and voice, petting, opt-in camera gestures.
+
+Not built yet (see [docs/ROADMAP.md](docs/ROADMAP.md)): live Office automation (COM), games, streaming, standalone installers that bundle the server, native app-store mobile builds.
 
 ## Run it
 
+You need **Node.js 22 LTS** (or 20.12+) and Git. On Windows use PowerShell (or Terminal); the commands are the same on macOS.
+
+**1. Once: install and configure**
 ```bash
+git clone -b claude/hopeful-franklin-ju5a2g https://github.com/folivares-ui/AI_waifu.git
+cd AI_waifu
 npm install
-cp .env.example .env   # optional; without a key the offline mock brain is used
-npm run dev:server     # http://127.0.0.1:8787/health
-npm run dev:web        # http://localhost:5173  (Chrome or Edge for voice)
+copy .env.example .env   # Windows;  macOS/Linux: cp .env.example .env
 ```
+Then open `.env` in a text editor. The server reads it by itself every time it starts. The most useful lines:
+- Brain: `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY=...`, or `LLM_PROVIDER=ollama` + `OLLAMA_MODEL=...` (local). With `mock` she only gives canned demo answers.
+- Rice's voice: `TTS_PROVIDER=voicestudio` and `STT_PROVIDER=voicestudio` (open VoiceStudio and create her voice once, see below).
+- Programs: `TOOLS=files,browser,vscode,blender` (add `desktop` only in the desktop app). Every change still asks you first.
+- Your 3D model: copy it to `apps/web/public/avatars/default.vrm`.
 
-For a real brain, export the variables from `.env` before `dev:server` (e.g. `ANTHROPIC_API_KEY=... LLM_PROVIDER=anthropic npm run dev:server`),
-or `LLM_PROVIDER=ollama OLLAMA_MODEL=<model you pulled>` for fully local.
+**2. Every time: start her**
+```bash
+npm run build   # only after downloading changes
+npm start       # then open http://localhost:8787 in Chrome or Edge
+```
+Close it with Ctrl+C in that window. When the browser tab is closed she stops acting on other programs.
+
+For development with hot reload use two terminals: `npm run dev:server` and `npm run dev:web` (http://localhost:5173).
 
 ```bash
-npm test         # unit/integration tests (core + server)
+npm test         # unit/integration tests (core + server + web)
 npm run typecheck
 ```
 
@@ -39,7 +55,7 @@ npm run typecheck
 `npm run build` once, then start the server: it serves the web app itself, so a single port gives UI + WebSocket + `/stt`.
 ```bash
 npm run build
-npm run dev:server            # http://127.0.0.1:8787  (loopback only: this PC)
+npm start                     # http://127.0.0.1:8787  (loopback only: this PC)
 ```
 
 ### Phone / tablet / another PC (installable PWA)
