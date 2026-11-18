@@ -31,6 +31,7 @@ copy .env.example .env   # Windows;  macOS/Linux: cp .env.example .env
 ```
 Then open `.env` in a text editor. The server reads it by itself every time it starts. The most useful lines:
 - Brain: `LLM_PROVIDER=ollama` (free, runs on your PC: install Ollama, then `ollama pull qwen2.5:3b`) or `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY=...` (paid, smarter). Both can use the program tools. With `mock` she only gives canned demo answers.
+- Both at once: `LLM_PROVIDER=anthropic` + `LLM_FALLBACK=ollama`. When Claude fails before answering (credits used up, rate limit, no internet) she continues with Ollama, shows a notice, and tries Claude again after 15 minutes (`LLM_FALLBACK_RETRY_MIN`).
 - Rice's voice: `TTS_PROVIDER=voicestudio` and `STT_PROVIDER=voicestudio` (open VoiceStudio and create her voice once, see below).
 - Programs: `TOOLS=files,browser,vscode,blender` (add `desktop` only in the desktop app). Every change still asks you first.
 - Your 3D model: copy it to `apps/web/public/avatars/default.vrm`.
@@ -69,12 +70,18 @@ At startup the server prints a pairing link (and a QR code) such as `https://192
 
 ### Desktop app (Tauri 2: Windows / macOS / Linux)
 `apps/desktop` is a thin native shell: it starts (or reuses) the local soul server, shows the UI in a native window and registers a global **Ctrl+Shift+Space** shortcut to toggle the microphone from any app.
-```bash
-npm run build                      # builds core + server check + web
-npm run dev -w @waifu/desktop      # needs Rust (https://rustup.rs) and your OS's Tauri prerequisites
-npm run build -w @waifu/desktop    # produces an installer for your OS
-```
-**Voice in the desktop app needs server-side STT** (`STT_PROVIDER`): system webviews (e.g. WebKitGTK, tested) do not provide the browser's Web Speech recognition, so without it you can only type. The server exits by itself if the app is closed or crashes. It looks for the project folder (set `WAIFU_ROOT` if needed) and runs `node --import tsx` on the server, so **Node.js and this repository must stay installed** next to the app: bundling the server into a standalone installer is not done yet. Configure everything through `.env`/environment as before.
+
+**Making the Windows .exe** (steps from Tauri's prerequisites guide; check it if something changed):
+1. Install the [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with **"Desktop development with C++"**. WebView2 already comes with Windows 10 (1803+) and 11.
+2. Install Rust: `winget install --id Rustlang.Rustup`, then `rustup default stable-msvc`. Close and reopen PowerShell.
+3. In the project folder: `npm run exe`. The first build takes a while (it compiles Rust and downloads the NSIS installer tools).
+4. The installer is in `apps\desktop\src-tauri\target\release\bundle\nsis\` (`AI Waifu_0.1.0_x64-setup.exe`). The app alone is `apps\desktop\src-tauri\target\release\waifu-desktop.exe`.
+
+Important: the .exe is only the window. It starts the server from **this project folder** with **Node.js**, so keep both installed and do not move the folder (or set `WAIFU_ROOT` to its new place). Bundling everything into one standalone installer is not done yet. Configure everything through `.env`. Disk space: Build Tools + Rust + the build need several GB (roughly 8–10 GB; check before installing).
+
+**Voice in the desktop app needs server-side STT** (`STT_PROVIDER`): system webviews may not provide the browser's Web Speech recognition, so without it you can only type. The server exits by itself if the app is closed or crashes.
+
+Other systems: `npm run dev -w @waifu/desktop` (development) and `npm run build -w @waifu/desktop` (all installers for your OS), after installing Rust and [Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ## Screen vision (opt-in)
 

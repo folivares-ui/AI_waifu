@@ -22,13 +22,15 @@ fn port_open(port: u16) -> bool {
     TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
 }
 
-/// Finds the repository root: $WAIFU_ROOT, or the nearest ancestor of the executable / cwd containing the server.
+/// Finds the repository root: $WAIFU_ROOT, or the nearest ancestor of the executable / cwd containing the server,
+/// or else the folder the app was built from (so an installed .exe in Program Files still finds the project).
 fn find_root() -> Option<PathBuf> {
     if let Ok(r) = std::env::var("WAIFU_ROOT") {
         return Some(PathBuf::from(r));
     }
     let marker = ["packages", "server", "src", "index.ts"];
-    let starts = [std::env::current_exe().ok(), std::env::current_dir().ok()];
+    let built_from = Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+    let starts = [std::env::current_exe().ok(), std::env::current_dir().ok(), built_from];
     for start in starts.into_iter().flatten() {
         let mut dir = Some(start.as_path());
         while let Some(d) = dir {

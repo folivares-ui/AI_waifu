@@ -35,7 +35,21 @@ const allowedOrigins = new Set([
 ]);
 
 const soul = loadSoul(process.env.SOUL_FILE ?? resolve(root, "souls/default.soul.json"));
-const llm = createLLM();
+// Open windows, so everyone sees when she changes brain.
+const sockets = new Set<import("ws").WebSocket>();
+const notify = (message: string) => {
+  for (const ws of sockets) if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "notice", message }));
+};
+const brainName = (n: string) => ({ anthropic: "Claude", ollama: "Ollama", mock: "el cerebro de prueba" })[n] ?? n;
+const llm = createLLM(process.env, (s) => {
+  const [from, target] = [brainName(s.from), brainName(s.target)];
+  const message =
+    s.to === "fallback"
+      ? `${from} no responde (${s.reason}). Rice sigue con ${target} en este equipo.`
+      : `Rice vuelve a usar ${target}.`;
+  console.log(`[brain] ${message}`);
+  notify(message);
+});
 const tts = createTTS();
 const stt = createSTT();
 const makeTools = createToolFactory();
@@ -118,6 +132,7 @@ let clients = 0;
 let goneTimer: NodeJS.Timeout | undefined;
 wss.on("connection", (ws) => {
   clients++;
+  sockets.add(ws);
   clearTimeout(goneTimer);
   const session = new Session(soul, llm, memory, (m) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m)), { tts, caps, tools: makeTools, watchMinIntervalMs: Number(process.env.WATCH_MIN_INTERVAL_MS ?? 25000), actionLog, approvalTimeoutMs: Number(process.env.APPROVAL_TIMEOUT_MS ?? 120000) });
   session.hello();
@@ -130,6 +145,7 @@ wss.on("connection", (ws) => {
   });
   ws.on("close", () => {
     session.close();
+    sockets.delete(ws);
     clients--;
     // A few seconds of grace so a page reload does not close her browser.
     if (clients === 0) goneTimer = setTimeout(() => void onAllClientsGone().then(() => console.log("[app] no window open: her browser closed, file permissions withdrawn")), 5000);

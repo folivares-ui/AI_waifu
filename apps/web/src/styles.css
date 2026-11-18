@@ -141,6 +141,8 @@ h1 { margin: 0; font-size: 1.15rem; font-weight: 800; letter-spacing: .01em; tex
   padding: 10px 14px; border-radius: 14px; background: rgba(120, 24, 48, .92); border: 1px solid rgba(255, 140, 170, .4); font-size: .88rem; animation: rise .2s ease;
 }
 
+.toast.info { background: rgba(40, 34, 96, .92); border-color: rgba(170, 160, 255, .45); }
+
 /* Settings sheet */
 .sheet-backdrop { position: fixed; inset: 0; z-index: 10; background: rgba(5, 4, 15, .55); display: flex; align-items: flex-end; justify-content: center; animation: fade .2s ease; }
 @keyframes fade { from { opacity: 0; } }

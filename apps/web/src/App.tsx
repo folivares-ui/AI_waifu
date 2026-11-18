@@ -409,10 +409,16 @@ export function App() {
         </div>
       </div>
 
-      {errorText && (
+      {errorText ? (
         <p className="toast" role="alert">
           {errorText}
         </p>
+      ) : (
+        soul.notice && (
+          <p className="toast info" role="status">
+            {soul.notice}
+          </p>
+        )
       )}
 
       {settingsOpen && (

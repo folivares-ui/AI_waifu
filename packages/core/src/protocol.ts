@@ -57,6 +57,8 @@ export type ServerMessage =
   /** A pending approval expired or its turn was cancelled: hide it. */
   | { type: "approval_cancel"; id: string }
   | { type: "done"; turnId: number; interrupted: boolean }
+  /** Informational message for the user (e.g. "switched to the local brain"); not an error. */
+  | { type: "notice"; message: string }
   | { type: "error"; message: string };
 
 export interface Capabilities {

@@ -26,6 +26,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
   const [caps, setCaps] = useState<Capabilities>({ tts: false, stt: false, vision: false });
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
   const [toolStatus, setToolStatus] = useState<string>();
   const [approvals, setApprovals] = useState<Extract<ServerMessage, { type: "approval_request" }>[]>([]);
   const nextId = useRef(1);
@@ -48,6 +49,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
   useEffect(() => {
     let closed = false;
     let retry: ReturnType<typeof setTimeout>;
+    let noticeTimer: ReturnType<typeof setTimeout> | undefined;
     const connect = () => {
       const sock = new WebSocket(wsUrl());
       ws.current = sock;
@@ -96,6 +98,10 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
         } else if (m.type === "done") {
           setToolStatus(undefined);
           if (m.interrupted) h.current.onInterruptedDone();
+        } else if (m.type === "notice") {
+          setNotice(m.message);
+          clearTimeout(noticeTimer);
+          noticeTimer = setTimeout(() => setNotice(undefined), 8000);
         } else if (m.type === "error") {
           setError(m.message);
         }
@@ -105,6 +111,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
     return () => {
       closed = true;
       clearTimeout(retry);
+      clearTimeout(noticeTimer);
       ws.current?.close();
     };
   }, []);
@@ -134,6 +141,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
     toolStatus,
     lines,
     error,
+    notice,
     sendText,
     sendScreenFrame: (requestId: string, image?: ScreenImage, error?: "not_sharing" | "failed") =>
       send({ type: "screen_frame", requestId, ...(image ? { image } : {}), ...(error ? { error } : {}) }),
