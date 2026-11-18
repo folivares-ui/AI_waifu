@@ -8,7 +8,7 @@ import { startMic, type MicHandle } from "./mic";
 import { savePersonal, transcribe } from "./net";
 import { ClipPlayer } from "./player";
 import { ScreenShare } from "./screen";
-import { useSoul } from "./useSoul";
+import { storedSpeechLang, useSoul } from "./useSoul";
 import { Listener, Speaker, sttSupported } from "./voice";
 
 const ECHO_WINDOW_MS = 1200; // after she stops talking, treat mic input with extra suspicion
@@ -19,6 +19,9 @@ export function App() {
   const [listening, setListening] = useState(false);
   const [headphones, setHeadphones] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<string>();
+  const [voiceHint, setVoiceHint] = useState<string>();
+  const voiceWarned = useRef(false);
+  const [chosenSpokenLang, setSpokenLang] = useState(storedSpeechLang);
   const [status, setStatus] = useState("");
   const [text, setText] = useState("");
   const [micError, setMicError] = useState<string>();
@@ -58,10 +61,20 @@ export function App() {
   };
 
   const soul = useSoul({
-    onSentence: (t, e) => {
+    // The text stays on screen (subtitles); what she says aloud may be another language (e.g. Japanese).
+    onSentence: (t, e, speech) => {
       setEmotion(e);
       rememberSpoken(t);
-      speaker.current?.speak(t);
+      if (speech) rememberSpoken(speech.say);
+      const ok = speaker.current?.speak(speech?.say ?? t, speech?.lang);
+      if (ok === false && speech?.lang && !voiceWarned.current) {
+        voiceWarned.current = true;
+        setVoiceHint(
+          speech.lang.startsWith("ja")
+            ? "No hay una voz japonesa instalada. En Windows: Configuracion > Hora e idioma > Voz > Agregar voces > Japones. En Edge o Chrome suelen venir incluidas."
+            : `No hay una voz instalada para ${speech.lang}.`,
+        );
+      }
     },
     // Without audio output, speak the sentence with the system voice (if any) instead of losing it.
     onAudio: (clip) => (getPlayer().available ? getPlayer().enqueue(clip) : speaker.current?.speak(clip.text)),
@@ -82,6 +95,7 @@ export function App() {
   };
 
   // Errors are shown as a toast that goes away by itself.
+  const spokenLang = chosenSpokenLang ?? soul.voice.speechLang ?? soul.voice.lang;
   const errorText = micError ?? soul.error;
   useEffect(() => {
     if (!micError) return;
@@ -415,9 +429,9 @@ export function App() {
           {errorText}
         </p>
       ) : (
-        soul.notice && (
-          <p className="toast info" role="status">
-            {soul.notice}
+        (soul.notice ?? voiceHint) && (
+          <p className="toast info" role="status" onClick={() => setVoiceHint(undefined)}>
+            {soul.notice ?? voiceHint}
           </p>
         )
       )}
@@ -445,6 +459,22 @@ export function App() {
               </span>
               <span className="btn">Elegir .vrm</span>
               <input type="file" accept=".vrm,.glb" hidden onChange={(e) => e.target.files?.[0] && window.dispatchEvent(new CustomEvent("waifu:load-model", { detail: e.target.files[0] }))} />
+            </label>
+            <label className="row">
+              <span>
+                Hablar en japones
+                <small>Dice sus frases en japones, como en el anime; en pantalla ves lo que dice en espanol. Tu le sigues hablando en espanol.</small>
+              </span>
+              <input
+                type="checkbox"
+                checked={spokenLang.startsWith("ja")}
+                onChange={(e) => {
+                  const lang = e.target.checked ? "ja-JP" : soul.voice.lang;
+                  setSpokenLang(lang);
+                  soul.setSpeechLang(lang);
+                  voiceWarned.current = false;
+                }}
+              />
             </label>
             <label className="row file">
               <span>

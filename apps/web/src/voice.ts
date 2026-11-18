@@ -21,6 +21,21 @@ export const sttSupported = !!RecognitionCtor;
 const synth = (): SpeechSynthesis | undefined =>
   typeof SpeechSynthesisUtterance === "undefined" ? undefined : ((globalThis as { speechSynthesis?: SpeechSynthesis }).speechSynthesis ?? undefined);
 
+/** Female and natural/online voices sound closer to her; male voices are avoided. */
+const GOOD = /natural|online|neural|google|nanami|haruka|ayumi|mayu|aoi|shiori|kyoko|o-ren|elvira|helena|laura|lucia|monica|paulina|sabina|dalia|elena/i;
+const MALE = /ichiro|keita|daichi|naoki|otoya|hattori|alvaro|pablo|raul|jorge|diego|jose|gonzalo|male\b/i;
+
+/** Picks the best installed voice for a language (e.g. a natural female Japanese voice for "ja-JP"). */
+export function pickVoice(voices: SpeechSynthesisVoice[], lang: string): SpeechSynthesisVoice | undefined {
+  const want = lang.toLowerCase();
+  const prefix = want.slice(0, 2);
+  const score = (v: SpeechSynthesisVoice) =>
+    (v.lang.toLowerCase().replace("_", "-") === want ? 2 : 0) + (GOOD.test(v.name) ? 3 : 0) - (MALE.test(v.name) ? 5 : 0);
+  return voices
+    .filter((v) => v.lang.toLowerCase().replace("_", "-").startsWith(prefix))
+    .sort((a, b) => score(b) - score(a))[0];
+}
+
 /** Continuous speech-to-text. `onInterim` fires as soon as the user starts talking (for barge-in). */
 export class Listener {
   private rec?: Recognition;
@@ -90,14 +105,18 @@ export class Speaker {
     this.voice = v;
   }
 
-  speak(text: string) {
+  /**
+   * Speaks a line with the system voice, in `lang` (default: her text language). Returns false when this
+   * browser/Windows has no voice for that language (the caller can tell the user once).
+   */
+  speak(text: string, lang = this.voice.lang): boolean {
     const tts = synth();
-    if (!tts) return;
+    if (!tts) return false;
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = this.voice.lang;
+    u.lang = lang;
     u.pitch = this.voice.pitch;
     u.rate = this.voice.rate;
-    const voice = tts.getVoices().find((v) => v.lang.startsWith(this.voice.lang.slice(0, 2)));
+    const voice = pickVoice(tts.getVoices(), lang);
     if (voice) u.voice = voice;
     this.pending++;
     const done = () => {
@@ -108,6 +127,8 @@ export class Speaker {
     u.onend = done;
     u.onerror = done;
     tts.speak(u);
+    // getVoices() can be empty until the browser has loaded them: only report "missing" once they are known.
+    return !!voice || tts.getVoices().length === 0;
   }
 
   /** Immediately silence everything (barge-in). */

@@ -16,6 +16,7 @@ class Recorder implements LLMProvider {
   seen: LLMRequest[] = [];
   async *stream(req: LLMRequest): AsyncGenerator<string> {
     if (req.system.includes("Return ONLY a JSON array")) return yield "[]";
+    if (req.system.startsWith("TRANSLATE_FOR_SPEECH")) return yield "ライス"; // spoken-language translation
     this.seen.push(structuredClone({ ...req, signal: undefined }));
     yield "Rice esta aqui.";
   }

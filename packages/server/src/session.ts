@@ -16,6 +16,7 @@ import { ActionLog } from "./actionLog.js";
 import type { ChatMessage, ContentBlock, LLMEvent, LLMProvider } from "./llm/index.js";
 import { extractFacts, type MemoryStore } from "./memory.js";
 import { buildSystemPrompt, type Soul } from "./soul.js";
+import { needsSpeechTranslation, speechLangOf, translateForSpeech, validLang } from "./speech.js";
 import type { ApprovalInfo } from "./tools/types.js";
 import type { Tool, ToolContext } from "./tools/index.js";
 import type { TTSProvider } from "./tts/index.js";
@@ -82,6 +83,8 @@ export class Session {
   private busy = false;
   /** Last voice-engine error shown, so the same problem is reported once, not after every sentence. */
   private lastTtsError?: { message: string; at: number };
+  /** Spoken language chosen in the app's settings (undefined = the soul's default). */
+  private chosenSpeechLang?: string;
   private lastWatch = 0;
   private lastReaction = -Infinity;
   private reactionMin: number;
@@ -160,6 +163,10 @@ export class Session {
           // Uncomfortable touches always get an answer, even soon after the previous one.
           sensitive,
         );
+      }
+      case "speech_lang": {
+        this.chosenSpeechLang = msg.lang === null ? undefined : validLang(msg.lang) ? msg.lang : this.chosenSpeechLang;
+        return;
       }
       case "gesture": {
         if (!GESTURES.includes(msg.gesture)) return;
@@ -245,12 +252,33 @@ export class Session {
     let seq = 0;
     const deliver = (text: string, emotion: Emotion) => {
       const spoken = prepareForSpeech(text);
-      if (!this.tts || !spoken) {
-        this.send({ type: "sentence", turnId, text, emotion });
+      if (!spoken) {
+        chain = chain.then(() => void this.send({ type: "sentence", turnId, text, emotion }));
+        return;
+      }
+      // She may speak another language than the one shown (e.g. Japanese aloud, Spanish subtitles).
+      const lang = speechLangOf(this.soul, this.chosenSpeechLang);
+      const speech: Promise<{ say: string; lang: string }> = needsSpeechTranslation(this.soul, lang)
+        ? translateForSpeech(this.llm, this.soul, spoken, lang, abort.signal).then(
+            (say) => ({ say, lang }),
+            (err) => {
+              if (!abort.signal.aborted) console.warn(`[speech] translation failed, speaking the original: ${err instanceof Error ? err.message : err}`);
+              return { say: spoken, lang: this.soul.voice.lang };
+            },
+          )
+        : Promise.resolve({ say: spoken, lang: this.soul.voice.lang });
+      // What the client should say itself when there is no server audio.
+      const asSentence = (sp: { say: string; lang: string }) =>
+        this.send({ type: "sentence", turnId, text, emotion, ...(sp.say !== spoken || sp.lang !== this.soul.voice.lang ? { speech: sp.say, speechLang: sp.lang } : {}) });
+      if (!this.tts) {
+        chain = chain.then(async () => {
+          const sp = await speech;
+          if (!abort.signal.aborted) asSentence(sp);
+        });
         return;
       }
       const mySeq = seq++;
-      const synth = this.tts.synthesize(spoken, { voice: this.soul.voice.ttsVoice, lang: this.soul.voice.lang }, abort.signal);
+      const synth = speech.then((sp) => this.tts!.synthesize(sp.say, { voice: this.soul.voice.ttsVoice, lang: sp.lang }, abort.signal));
       synth.catch(() => {}); // handled in the chain below
       chain = chain.then(async () => {
         try {
@@ -263,7 +291,7 @@ export class Session {
           const last = this.lastTtsError;
           if (!last || last.message !== message || Date.now() - last.at > 5 * 60_000) this.send({ type: "error", message });
           this.lastTtsError = { message, at: Date.now() };
-          this.send({ type: "sentence", turnId, text, emotion });
+          asSentence(await speech);
         }
       });
     };

@@ -178,6 +178,12 @@ The browser console prints an `[avatar] converted model: ...` line listing what 
 
 Check the license of any model you use: a "CC-BY" tag on a fan upload of a commercial game's character does not necessarily cover the character itself. Keep such models for personal use (the `avatars/` folder is git-ignored, so they are never pushed).
 
+## Japanese voice with Spanish subtitles
+Rice speaks **Japanese** (like in the anime) while her words are shown in **Spanish**; you keep talking to her in Spanish. Each sentence is translated in character (she calls herself 「ライス」 and you 「お兄さま」) by the same brain just before it is spoken, so it costs one extra short request per sentence and adds a little delay. Switch it in Ajustes → "Hablar en japones" (remembered on that device), with `SPEECH_LANG` in `.env`, or with `speechLang`/`speechStyle` in the soul file.
+- Browser voice: needs a Japanese voice. Edge and Chrome usually include one (online natural voices); on Windows you can add one in Configuración → Hora e idioma → Voz → Agregar voces → Japonés. The app tells you if none is found.
+- VoiceStudio: the sentence is synthesized in Japanese with her cloned voice (whose reference clip is Japanese).
+- Speech recognition stays Spanish. Use headphones if the microphone picks up her Japanese voice.
+
 ## Petting and gestures
 - **Petting:** move the cursor (or a finger) over her. Head pats, ears, cheeks, hair, hands... each gets its own expressive reaction (and a short spoken line now and then); private areas make her flustered and she politely asks you to stop. Hovering without moving does nothing.
 - **Camera gestures (opt-in):** press the camera button. While it is on, a preview with a red "Camara" badge is visible; the images are analysed on your device and never sent anywhere (only the gesture name). 👋 wave (she waves back), 👍, 👎, ✌️, 🤟, ☝️, ✊, and ✋ held still = "stop talking". A held gesture counts once. Setup: `npm run setup:gestures` (also runs automatically before `dev`/`build` of the web app).

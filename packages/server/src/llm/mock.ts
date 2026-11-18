@@ -5,6 +5,11 @@ export class MockProvider implements LLMProvider {
   readonly name = "mock";
   readonly vision = true;
   async *stream(req: LLMRequest): AsyncIterable<string> {
+    // Spoken-language translation (speech.ts): the demo brain cannot translate; it returns the line unchanged.
+    if (req.system.startsWith("TRANSLATE_FOR_SPEECH")) {
+      yield asText(req.messages.at(-1)?.content ?? "");
+      return;
+    }
     // Demo reactions (no API key): petting and gestures, in Rice Shower's style.
     const touch = asText(req.messages.at(-1)?.content ?? "").match(/^\[(Caricia con el cursor|Gesto con la mano ante la camara): ([^\]]+)\]/);
     if (touch) {

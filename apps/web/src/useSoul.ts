@@ -15,7 +15,16 @@ function wsUrl(): string {
 }
 
 /** Connection to the soul server. Sentences arrive ready for TTS. */
-export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion) => void; onAudio: (clip: Clip) => void; onInterruptedDone: () => void; onScreenRequest: (requestId: string) => void }) {
+const SPEECH_LANG_KEY = "waifu_speech_lang";
+export function storedSpeechLang(): string | undefined {
+  try {
+    return localStorage.getItem(SPEECH_LANG_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion, speech?: { say: string; lang?: string }) => void; onAudio: (clip: Clip) => void; onInterruptedDone: () => void; onScreenRequest: (requestId: string) => void }) {
   const ws = useRef<WebSocket | undefined>(undefined);
   const h = useRef(handlers);
   h.current = handlers;
@@ -69,6 +78,9 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
       sock.onmessage = (ev) => {
         const m = JSON.parse(ev.data) as ServerMessage;
         if (m.type === "ready") {
+          // Re-apply the spoken language chosen in the settings (kept on this device).
+          const chosen = storedSpeechLang();
+          if (chosen) ws.current?.send(JSON.stringify({ type: "speech_lang", lang: chosen }));
           setName(m.soul.name);
           setVoice(m.soul.voice);
           setNames(m.soul.names);
@@ -84,7 +96,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
             return [...ls, { id: nextId.current++, who: "soul", text: m.text.replace(/\[emotion:[^\]]*\]?/gi, "") }];
           });
         } else if (m.type === "sentence") {
-          if (!dropped(m.turnId)) h.current.onSentence(m.text, m.emotion);
+          if (!dropped(m.turnId)) h.current.onSentence(m.text, m.emotion, m.speech ? { say: m.speech, lang: m.speechLang } : undefined);
         } else if (m.type === "audio") {
           if (!dropped(m.turnId)) h.current.onAudio({ data: b64ToBuffer(m.data), emotion: m.emotion, text: m.text });
         } else if (m.type === "approval_request") {
@@ -148,6 +160,15 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion)
     sendWatch: (image: ScreenImage) => send({ type: "screen_watch", image }),
     sendTouch: (region: TouchRegion) => send({ type: "touch", region }),
     sendGesture: (gesture: Gesture) => send({ type: "gesture", gesture }),
+    /** Language she speaks aloud from now on; remembered on this device. */
+    setSpeechLang: (lang: string) => {
+      try {
+        localStorage.setItem(SPEECH_LANG_KEY, lang);
+      } catch {
+        /* private mode: still applied for this session */
+      }
+      send({ type: "speech_lang", lang });
+    },
     approvals,
     answerApproval: (id: string, approved: boolean) => {
       const a = approvals.find((x) => x.id === id);

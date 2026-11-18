@@ -28,6 +28,8 @@ export type ClientMessage =
   | { type: "touch"; region: TouchRegion }
   /** The user made a hand gesture in front of the camera (recognised on the device; no images are sent). */
   | { type: "gesture"; gesture: Gesture }
+  /** The language she should speak aloud from now on (e.g. "ja-JP" with Spanish subtitles); null = the soul's default. */
+  | { type: "speech_lang"; lang: string | null }
   /** The user's answer to an `approval_request`. Only answers to pending requests are accepted. */
   | { type: "approval_response"; id: string; approved: boolean }
   /** User started speaking / sent new input while the soul is talking: stop current turn. */
@@ -42,7 +44,7 @@ export type ServerMessage =
    * A complete sentence. Sent when the server has NO audio for it (TTS disabled or failed), so the
    * client should speak it itself (browser TTS). Otherwise the sentence arrives as an `audio` message.
    */
-  | { type: "sentence"; turnId: number; text: string; emotion: Emotion }
+  | { type: "sentence"; turnId: number; text: string; emotion: Emotion; /** What to say aloud, if not `text` (e.g. Japanese). */ speech?: string; speechLang?: string }
   /** Synthesized speech for one sentence, in order. `data` is base64. Emotion applies while it plays. */
   | { type: "audio"; turnId: number; seq: number; text: string; emotion: Emotion; mime: string; data: string }
   /** The soul is running a tool (e.g. querying a public API). For UI feedback only. */
@@ -77,6 +79,13 @@ export interface VoiceHints {
   rate: number;
   /** Voice name/id for the server TTS engine (engine specific). */
   ttsVoice?: string;
+  /**
+   * Language she SPEAKS in, when different from `lang` (the language of the text and of what she hears).
+   * E.g. "ja-JP": she speaks Japanese and her Spanish text is shown as subtitles.
+   */
+  speechLang?: string;
+  /** How to phrase her lines in `speechLang` (character voice notes for the translation). */
+  speechStyle?: string;
 }
 
 /**
