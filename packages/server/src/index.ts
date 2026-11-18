@@ -69,7 +69,7 @@ const voiceStudioRoot = (process.env.TTS_BASE_URL ?? process.env.STT_BASE_URL ??
 let launchedVoiceStudio: import("node:child_process").ChildProcess | undefined;
 const voiceStudioReady: Promise<void> =
   usesVoiceStudio && process.env.VOICESTUDIO_AUTOSTART !== "0"
-    ? ensureVoiceStudio(voiceStudioRoot, { exe: findVoiceStudio() }).then((r) => {
+    ? ensureVoiceStudio(voiceStudioRoot, { exe: findVoiceStudio(), log: (m) => console.log(`[voice] ${m}`) }).then((r) => {
         if (r.status === "started") {
           launchedVoiceStudio = r.child;
           console.log("[voice] VoiceStudio was closed: Rice opened it and it is ready");

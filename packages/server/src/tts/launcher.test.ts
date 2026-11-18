@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { ensureVoiceStudio, findVoiceStudio } from "./launcher.js";
+import { cleanEnv, ensureVoiceStudio, findVoiceStudio } from "./launcher.js";
 
 const fakeChild = () => Object.assign(new EventEmitter(), { pid: 123, exitCode: null }) as unknown as ChildProcess;
 
@@ -29,5 +29,9 @@ describe("opening VoiceStudio automatically", () => {
     const usual = "C:\\Users\\F\\AppData\\Local\\Programs\\VoiceStudio\\VoiceStudio.exe".replace(/\\/g, require("node:path").sep);
     const local = "C:\\Users\\F\\AppData\\Local".replace(/\\/g, require("node:path").sep);
     expect(findVoiceStudio({ LOCALAPPDATA: local }, "win32", has([usual]))).toBe(usual);
+  });
+  it("opens it with a clean environment (no Node/tsx/npm settings of the server)", () => {
+    const e = cleanEnv({ PATH: "p", NODE_OPTIONS: "--import tsx", ELECTRON_RUN_AS_NODE: "1", npm_config_x: "1", WAIFU_PARENT_PID: "9", USERPROFILE: "u" });
+    expect(e).toEqual({ PATH: "p", USERPROFILE: "u" });
   });
 });
