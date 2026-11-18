@@ -16,4 +16,14 @@ describe(".env loading", () => {
     expect(process.env.WAIFU_T_D).toBe("wav");
     expect(loadDotEnv(f + ".nope")).toBe(false);
   });
+
+  it("is not fooled by spaces after '=' or Windows line endings (Notepad)", () => {
+    const f = join(mkdtempSync(join(tmpdir(), "env-")), ".env");
+    writeFileSync(f, "\uFEFFWAIFU_U_KEY= \r\nWAIFU_U_MODEL=claude-sonnet-5-5\r\nWAIFU_U_FB= \r\n# WAIFU_U_X=15\r\nWAIFU_U_PROV=mock  \r\n");
+    loadDotEnv(f);
+    expect(process.env.WAIFU_U_KEY).toBeUndefined();
+    expect(process.env.WAIFU_U_MODEL).toBe("claude-sonnet-5-5");
+    expect(process.env.WAIFU_U_FB).toBeUndefined();
+    expect(process.env.WAIFU_U_PROV).toBe("mock");
+  });
 });

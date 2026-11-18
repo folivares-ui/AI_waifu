@@ -10,7 +10,14 @@ import { appDir, userDir } from "./paths.js";
  */
 export function loadDotEnv(file = join(userDir, ".env")): boolean {
   if (!existsSync(file)) return false;
-  for (const [k, v] of Object.entries(parseEnv(readFileSync(file, "utf8")))) {
+  // Trailing spaces are removed first: Node's parser reads "KEY= " (space after =) as if the NEXT line were its
+  // value, an easy accident when editing in Notepad.
+  const text = readFileSync(file, "utf8")
+    .replace(/^\uFEFF/, "")
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\s+$/, ""))
+    .join("\n");
+  for (const [k, v] of Object.entries(parseEnv(text))) {
     if (v !== "" && process.env[k] === undefined) process.env[k] = v;
   }
   return true;
