@@ -140,6 +140,8 @@ npm run tts:test -w @waifu/server -- "Hola, soy tu companera"   # writes data/tt
 - If it is not running, the server reports "cannot reach http://localhost:3900 ... is the voice server running?" and she falls back to the browser voice.
 
 ### Rice Shower's voice
+**You do not need to open VoiceStudio yourself:** when it is the voice engine, Rice opens it at start (and closes it when she closes) and her first sentences wait until it is ready. If it is not found, set `VOICESTUDIO_PATH` in `.env`.
+
 **Easiest:** with VoiceStudio open, go to Ajustes → "Voz de Rice Shower" and choose a `.wav` sample. It is saved in `data/voices/voice-ref.wav` and her voice is created in VoiceStudio automatically (also at every start if it is missing), so you never upload it again.
 
 Reference clips cut from the voice sample you provided live in `data/voices/rice-shower/` (git-ignored: they are someone else's recordings, keep them private). Only the clean narration part was used (mono, no music or effects); `rice-ref-2.wav` (7 s, the most expressive) is the recommended one, the others are alternatives. With VoiceStudio open:

@@ -151,7 +151,11 @@ export class VoiceStudioTTS extends OpenAICompatibleTTS {
   /** Waits between retries when VoiceStudio says it is busy (overridable in tests). */
   retryDelaysMs = [400, 800, 1500, 2500, 4000, 6000];
 
+  /** Set while Rice is opening VoiceStudio: speech waits for it instead of failing. */
+  starting?: Promise<void>;
+
   async synthesize(text: string, opts: TTSOptions, signal?: AbortSignal): Promise<TTSResult> {
+    if (this.starting) await this.starting;
     const voice = await this.resolveVoice(opts.voice ?? this.vs.voice);
     const job = this.queue.then(() => this.withRetry(() => super.synthesize(text, { ...opts, voice }, signal), signal));
     this.queue = job.catch(() => {}); // a failed sentence must not block the next ones

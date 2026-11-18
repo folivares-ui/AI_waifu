@@ -17,6 +17,7 @@ import { createStaticHandler } from "./static.js";
 import { browserForShutdown, createToolFactory, onAllClientsGone } from "./tools/index.js";
 import { createSTT } from "./stt/index.js";
 import { createTTS, VoiceStudioTTS } from "./tts/index.js";
+import { closeLaunched, ensureVoiceStudio, findVoiceStudio } from "./tts/launcher.js";
 import { avatarFile, currentVoiceSample, isGlb, isWav, MAX_AVATAR_BYTES, MAX_VOICE_BYTES, removeIfExists, saveAtomic, voiceFile } from "./personal.js";
 
 import { appPath, userOrApp, userPath } from "./paths.js";
@@ -62,8 +63,31 @@ async function ensureVoice(sample = currentVoiceSample()): Promise<string> {
   if (r.status === "unreachable") return "VoiceStudio no esta abierto: la voz se creara la proxima vez que arranques con VoiceStudio abierto";
   return r.status === "created" ? `voz "${voiceName}" creada en VoiceStudio` : `VoiceStudio ya tiene la voz "${voiceName}"`;
 }
+// VoiceStudio makes her cloned voice. If it is not running, Rice opens it herself (and closes it when she closes).
+const usesVoiceStudio = tts instanceof VoiceStudioTTS || stt?.name === "voicestudio";
+const voiceStudioRoot = (process.env.TTS_BASE_URL ?? process.env.STT_BASE_URL ?? "http://localhost:3900/v1").replace(/\/+$/, "").replace(/\/v1$/, "");
+let launchedVoiceStudio: import("node:child_process").ChildProcess | undefined;
+const voiceStudioReady: Promise<void> =
+  usesVoiceStudio && process.env.VOICESTUDIO_AUTOSTART !== "0"
+    ? ensureVoiceStudio(voiceStudioRoot, { exe: findVoiceStudio() }).then((r) => {
+        if (r.status === "started") {
+          launchedVoiceStudio = r.child;
+          console.log("[voice] VoiceStudio was closed: Rice opened it and it is ready");
+        } else if (r.status === "timeout") {
+          launchedVoiceStudio = r.child;
+          console.warn("[voice] VoiceStudio was opened but did not answer within 2 minutes (is it still loading?)");
+        } else if (r.status === "not-found") {
+          console.warn("[voice] VoiceStudio is not open and was not found. Open it, or set VOICESTUDIO_PATH in .env so Rice can open it herself.");
+        }
+      })
+    : Promise.resolve();
+if (tts instanceof VoiceStudioTTS) tts.starting = voiceStudioReady.finally(() => (tts.starting = undefined));
+process.on("exit", () => {
+  if (process.env.VOICESTUDIO_AUTOCLOSE !== "0") closeLaunched(launchedVoiceStudio);
+});
 if (tts instanceof VoiceStudioTTS) {
-  ensureVoice()
+  voiceStudioReady
+    .then(() => ensureVoice())
     .then((m) => console.log(`[voice] ${m}`))
     .then(() => tts.resolveVoice(voiceName))
     .then((id) => console.log(`[voice] VoiceStudio: "${voiceName}" -> ${id === voiceName ? "sent as given (could not list its voices: is VoiceStudio open?)" : `profile ${id}`}`))
