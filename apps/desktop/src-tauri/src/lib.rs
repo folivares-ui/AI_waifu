@@ -43,15 +43,54 @@ fn find_root() -> Option<PathBuf> {
     None
 }
 
-fn spawn_server(root: &PathBuf, control: Option<&control::ControlInfo>) -> std::io::Result<Child> {
-    // `node --import tsx` runs the TypeScript server directly (the same thing `npm run start` does),
-    // and lets us kill the actual server process on exit instead of an npm wrapper.
-    let mut cmd = Command::new(std::env::var("WAIFU_NODE").unwrap_or_else(|_| "node".into()));
-    cmd.args(["--import", "tsx", "src/index.ts"])
-        .current_dir(root.join("packages").join("server"))
-        // The server exits by itself if this process disappears (crash, force quit), so it is never orphaned.
-        .env("WAIFU_PARENT_PID", std::process::id().to_string())
-        .stdin(Stdio::null());
+/// Where the server comes from: inside the installed app (its own Node.js + bundled server), or the project
+/// folder during development (system Node.js + TypeScript sources).
+enum Source {
+    Bundled { app: PathBuf, home: PathBuf },
+    Repo(PathBuf),
+}
+
+/// Windows resource paths can come back as `\\?\C:\...`; give Node a plain path.
+fn plain(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy().to_string();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
+        _ => p,
+    }
+}
+
+/// The installed app ships everything in `<resources>/app` (see scripts/bundle-app.mjs). Its data (your .env,
+/// memory, logs, backups) goes to the per-user app data folder, because Program Files is read-only.
+fn bundled(handle: &tauri::AppHandle) -> Option<Source> {
+    let app = plain(handle.path().resource_dir().ok()?.join("app"));
+    if !app.join("server").join("index.mjs").exists() {
+        return None;
+    }
+    let home = plain(handle.path().app_data_dir().ok()?);
+    Some(Source::Bundled { app, home })
+}
+
+fn spawn_server(source: &Source, control: Option<&control::ControlInfo>) -> std::io::Result<Child> {
+    let mut cmd = match source {
+        Source::Bundled { app, home } => {
+            let node = app.join("node").join(if cfg!(windows) { "node.exe" } else { "node" });
+            let mut c = Command::new(node);
+            c.arg(app.join("server").join("index.mjs"))
+                .current_dir(app)
+                .env("WAIFU_APP_DIR", app)
+                .env("WAIFU_HOME", home);
+            c
+        }
+        Source::Repo(root) => {
+            // `node --import tsx` runs the TypeScript server directly (the same thing `npm run start` does),
+            // and lets us kill the actual server process on exit instead of an npm wrapper.
+            let mut c = Command::new(std::env::var("WAIFU_NODE").unwrap_or_else(|_| "node".into()));
+            c.args(["--import", "tsx", "src/index.ts"]).current_dir(root.join("packages").join("server"));
+            c
+        }
+    };
+    // The server exits by itself if this process disappears (crash, force quit), so it is never orphaned.
+    cmd.env("WAIFU_PARENT_PID", std::process::id().to_string()).stdin(Stdio::null());
     // Screen/mouse/keyboard endpoint for her "desktop" tools (every action still needs the user's approval).
     if let Some(c) = control {
         cmd.env("WAIFU_DESKTOP_URL", &c.url).env("WAIFU_DESKTOP_TOKEN", &c.token);
@@ -62,6 +101,19 @@ fn spawn_server(root: &PathBuf, control: Option<&control::ControlInfo>) -> std::
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
     cmd.spawn()
+}
+
+/// First run of the installed app: show the settings file (.env) so the user can choose brain, voice and tools.
+fn open_in_text_editor(path: &PathBuf) {
+    #[cfg(windows)]
+    let r = Command::new("notepad.exe").arg(path).spawn();
+    #[cfg(target_os = "macos")]
+    let r = Command::new("open").arg("-t").arg(path).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let r = Command::new("xdg-open").arg(path).spawn();
+    if let Err(e) = r {
+        eprintln!("could not open {}: {e}", path.display());
+    }
 }
 
 fn show_error(app: &tauri::AppHandle, message: &str) {
@@ -113,24 +165,38 @@ pub fn run() {
             }
             let handle = app.handle().clone();
             std::thread::spawn(move || {
+                let mut first_run_env: Option<PathBuf> = None;
                 if !port_open(PORT) {
-                    match find_root() {
-                        None => return show_error(&handle, "No encuentro el proyecto (carpeta con packages/server). Define WAIFU_ROOT."),
-                        Some(root) => {
-                            if !root.join("apps").join("web").join("dist").join("index.html").exists() {
-                                return show_error(&handle, "Falta compilar la web: ejecuta 'npm run build' en la carpeta del proyecto.");
-                            }
-                            let control = match control::start() {
-                                Ok(c) => Some(c),
-                                Err(e) => {
-                                    eprintln!("desktop control unavailable: {e}");
-                                    None
+                    let source = match bundled(&handle) {
+                        Some(b) => b,
+                        None => match find_root() {
+                            None => return show_error(&handle, "No encuentro el proyecto (carpeta con packages/server). Define WAIFU_ROOT."),
+                            Some(root) => {
+                                if !root.join("apps").join("web").join("dist").join("index.html").exists() {
+                                    return show_error(&handle, "Falta compilar la web: ejecuta 'npm run build' en la carpeta del proyecto.");
                                 }
-                            };
-                            match spawn_server(&root, control.as_ref()) {
-                                Ok(child) => *handle.state::<ServerProc>().0.lock().unwrap() = Some(child),
-                                Err(e) => return show_error(&handle, &format!("No pude iniciar el servidor (esta Node.js instalado?): {e}")),
+                                Source::Repo(root)
                             }
+                        },
+                    };
+                    if let Source::Bundled { home, .. } = &source {
+                        let env = home.join(".env");
+                        if !env.exists() {
+                            first_run_env = Some(env); // the server creates it from env.example
+                        }
+                    }
+                    let control = match control::start() {
+                        Ok(c) => Some(c),
+                        Err(e) => {
+                            eprintln!("desktop control unavailable: {e}");
+                            None
+                        }
+                    };
+                    match spawn_server(&source, control.as_ref()) {
+                        Ok(child) => *handle.state::<ServerProc>().0.lock().unwrap() = Some(child),
+                        Err(e) => {
+                            let hint = if matches!(source, Source::Repo(_)) { " (esta Node.js instalado?)" } else { "" };
+                            return show_error(&handle, &format!("No pude iniciar el servidor{hint}: {e}"));
                         }
                     }
                 }
@@ -143,6 +209,9 @@ pub fn run() {
                 }
                 if let Some(w) = handle.get_webview_window("main") {
                     let _ = w.eval(&format!("window.location.replace('http://127.0.0.1:{PORT}/')"));
+                }
+                if let Some(env) = first_run_env.filter(|e| e.exists()) {
+                    open_in_text_editor(&env);
                 }
             });
             Ok(())

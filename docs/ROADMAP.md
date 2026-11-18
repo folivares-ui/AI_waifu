@@ -21,7 +21,7 @@ Voice chat, avatar, soul file, memory, swappable LLM.
 ## Phase 3 — Desktop app + remote access (DONE, with caveats)
 - [x] Server serves the web app; HTTPS option, token auth, pairing link/QR; installable PWA (manifest, icons, offline shell).
 - [x] Tauri 2 desktop shell: starts/reuses the server, native window, global push-to-talk shortcut, server never orphaned. Compiled and run on Linux (WebKitGTK); Windows/macOS builds not tried.
-- [ ] Standalone installers that bundle Node + the server (today the repo and Node must be present).
+- [x] Standalone installer that bundles Node + the server + the web app (Windows NSIS; user data in the app data folder). Built and run on Linux only.
 - [ ] Native iOS/Android wrappers (Tauri mobile or Capacitor); today phones use the PWA.
 - [ ] Transparent always-on-top "desktop pet" window mode.
 

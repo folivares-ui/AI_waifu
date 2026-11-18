@@ -3,8 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { networkInterfaces } from "node:os";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import qrcode from "qrcode-terminal";
 import { WebSocketServer } from "ws";
 import type { Capabilities, ClientMessage } from "@waifu/core";
@@ -18,7 +17,7 @@ import { browserForShutdown, createToolFactory, onAllClientsGone } from "./tools
 import { createSTT } from "./stt/index.js";
 import { createTTS } from "./tts/index.js";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+import { appPath, userOrApp, userPath } from "./paths.js";
 const port = Number(process.env.PORT ?? 8787);
 // Loopback only by default. To use from phone/another PC set HOST=0.0.0.0 AND AUTH_TOKEN.
 const host = process.env.HOST ?? "127.0.0.1";
@@ -34,7 +33,7 @@ const allowedOrigins = new Set([
   ...["http", "https"].flatMap((p) => [`${p}://localhost:${port}`, `${p}://127.0.0.1:${port}`]),
 ]);
 
-const soul = loadSoul(process.env.SOUL_FILE ?? resolve(root, "souls/default.soul.json"));
+const soul = loadSoul(userOrApp(process.env.SOUL_FILE ?? "souls/default.soul.json"));
 // Open windows, so everyone sees when she changes brain.
 const sockets = new Set<import("ws").WebSocket>();
 const notify = (message: string) => {
@@ -54,8 +53,8 @@ const tts = createTTS();
 const stt = createSTT();
 const makeTools = createToolFactory();
 const caps: Capabilities = { tts: !!tts, stt: !!stt, vision: !!llm.vision };
-const memory = new MemoryStore(process.env.MEMORY_FILE ?? resolve(root, "data/memory.json"));
-const actionLog = new ActionLog(process.env.ACTIONS_LOG ?? resolve(root, "data/actions.jsonl"));
+const memory = new MemoryStore(process.env.MEMORY_FILE ?? userPath("data/memory.json"));
+const actionLog = new ActionLog(process.env.ACTIONS_LOG ?? userPath("data/actions.jsonl"));
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 
 function authorized(req: IncomingMessage): boolean {
@@ -91,7 +90,7 @@ const json = (res: ServerResponse, code: number, body: unknown) => {
   res.end(JSON.stringify(body));
 };
 
-const webDir = process.env.WEB_DIR ?? resolve(root, "apps/web/dist");
+const webDir = process.env.WEB_DIR ?? appPath("apps/web/dist");
 const serveWeb = process.env.SERVE_WEB !== "0" && existsSync(resolve(webDir, "index.html"));
 // The avatar model is a personal asset: when a token is set, it needs the token like the API does.
 const serveStatic = serveWeb ? createStaticHandler(webDir, (p) => p.startsWith("/avatars/"), authorized) : undefined;

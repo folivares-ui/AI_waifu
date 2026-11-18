@@ -12,11 +12,15 @@
     "dev:web": "npm run dev -w @waifu/web",
     "build": "npm run build -w @waifu/core && npm run build -w @waifu/server && npm run build -w @waifu/web",
     "start": "npm run start -w @waifu/server",
-    "exe": "npm run build && npm run build:exe -w @waifu/desktop",
+    "exe": "npm run build && npm run bundle:app && npm run build:exe -w @waifu/desktop",
     "test": "npm run test -w @waifu/core && npm run test -w @waifu/server && npm run test -w @waifu/web",
     "typecheck": "npm run build -w @waifu/core && npm run typecheck -w @waifu/server && npm run typecheck -w @waifu/web",
     "avatar:sample": "node scripts/fetch-sample-avatar.mjs",
     "voice:create": "node scripts/voicestudio-voice.mjs",
-    "setup:gestures": "node scripts/fetch-gesture-model.mjs"
+    "setup:gestures": "node scripts/fetch-gesture-model.mjs",
+    "bundle:app": "node scripts/bundle-app.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }

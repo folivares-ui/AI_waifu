@@ -16,7 +16,7 @@ Also built: installable PWA + server-hosted app with HTTPS/pairing (phase 3), Ta
 
 Also built: app control with approval cards (phase 5), Rice Shower soul and voice, petting, opt-in camera gestures.
 
-Not built yet (see [docs/ROADMAP.md](docs/ROADMAP.md)): live Office automation (COM), games, streaming, standalone installers that bundle the server, native app-store mobile builds.
+Not built yet (see [docs/ROADMAP.md](docs/ROADMAP.md)): live Office automation (COM), games, streaming, native app-store mobile builds.
 
 ## Run it
 
@@ -71,13 +71,17 @@ At startup the server prints a pairing link (and a QR code) such as `https://192
 ### Desktop app (Tauri 2: Windows / macOS / Linux)
 `apps/desktop` is a thin native shell: it starts (or reuses) the local soul server, shows the UI in a native window and registers a global **Ctrl+Shift+Space** shortcut to toggle the microphone from any app.
 
-**Making the Windows .exe** (steps from Tauri's prerequisites guide; check it if something changed):
+**Making the Windows installer (.exe) that contains everything** (steps from Tauri's prerequisites guide; check it if something changed):
 1. Install the [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with **"Desktop development with C++"**. WebView2 already comes with Windows 10 (1803+) and 11.
 2. Install Rust: `winget install --id Rustlang.Rustup`, then `rustup default stable-msvc`. Close and reopen PowerShell.
-3. In the project folder: `npm run exe`. The first build takes a while (it compiles Rust and downloads the NSIS installer tools).
-4. The installer is in `apps\desktop\src-tauri\target\release\bundle\nsis\` (`AI Waifu_0.1.0_x64-setup.exe`). The app alone is `apps\desktop\src-tauri\target\release\waifu-desktop.exe`.
+3. In the project folder (after `npm install`): `npm run exe`. It builds the web app, bundles the server into one file, downloads the official Node.js `node.exe` from nodejs.org (checked against its published SHA-256) and packs it all. The first build takes a while.
+4. The installer is in `apps\desktop\src-tauri\target\release\bundle\nsis\` (`AI Waifu_<version>_x64-setup.exe`). It can be installed on any Windows PC: Node.js and this folder are **not** needed there.
 
-Important: the .exe is only the window. It starts the server from **this project folder** with **Node.js**, so keep both installed and do not move the folder (or set `WAIFU_ROOT` to its new place). Bundling everything into one standalone installer is not done yet. Configure everything through `.env`. Disk space: Build Tools + Rust + the build need several GB (roughly 8–10 GB; check before installing).
+What the installer contains: the window, Node.js, the server, the web app (with your `default.vrm` and the gesture model if they were in the project when you built it), the souls and an example settings file. What it does **not** contain: your `.env` (API keys), memory, logs or voice clips. On the first run it creates its own settings file and opens it in Notepad: `%APPDATA%\dev.waifu.companion\.env` (memory, backups and logs are kept in that folder too). Change it, then close and reopen the app. Ollama, VoiceStudio, VS Code, Blender and Chrome are separate programs: install them yourself if you use them.
+
+Disk space: Build Tools + Rust + the build need several GB (roughly 8–10 GB; check before installing). The installer itself is roughly 50–60 MB.
+
+If you prefer the light version (window only, using this project folder and your Node.js): `npm run build && npm run build -w @waifu/desktop`.
 
 **Voice in the desktop app needs server-side STT** (`STT_PROVIDER`): system webviews may not provide the browser's Web Speech recognition, so without it you can only type. The server exits by itself if the app is closed or crashes.
 
