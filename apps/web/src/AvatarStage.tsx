@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Avatar as SvgAvatar } from "./Avatar";
-import { serverBase } from "./net";
+import { savePersonal, serverBase } from "./net";
 import type { AvatarProps, TouchFx } from "./VrmAvatar";
 
 // three.js is large: only load it when a VRM model is actually available.
@@ -34,8 +34,11 @@ export function AvatarStage(props: AvatarProps) {
   const pick = async (file?: File) => {
     if (!file) return;
     const b = await file.arrayBuffer();
-    if (isGlb(b)) setModel(b);
-    else alert("Ese archivo no parece un modelo VRM/GLB valido.");
+    if (!isGlb(b)) return alert("Ese archivo no parece un modelo VRM/GLB valido.");
+    setModel(b);
+    // Keep it: next time the app opens with this model, no need to load it again.
+    const r = await savePersonal("avatar", b);
+    if (!r.ok) alert(`El modelo se muestra, pero no se pudo guardar: ${r.message}`);
   };
 
   return (

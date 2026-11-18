@@ -13,7 +13,7 @@ Voice chat, avatar, soul file, memory, swappable LLM.
 - [ ] Phoneme-accurate visemes (currently loudness-driven mouth shapes).
 - [ ] Streaming TTS (play audio before the sentence finishes synthesizing) for lower latency.
 - [ ] Memory v2: embeddings, summarisation of old conversations, forgetting/editing UI.
-- [ ] Persist a user-loaded VRM across reloads (currently only `public/avatars/default.vrm` persists).
+- [x] A VRM chosen in the settings is saved and loads every time; the voice sample is saved and recreates her VoiceStudio voice when missing.
 
 ## Phase 2.5 — Public APIs (DONE, see README)
 - [x] Catalog + read-only tools with SSRF/injection protections. [x] Tool support for Ollama (native tool calling; tested against a fake server only). [ ] Per-API usage hints/curated adapters for the most useful ones. [ ] Confirmation step before APIs that would need writes (none today: GET only).

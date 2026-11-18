@@ -22,3 +22,18 @@ export async function transcribe(wav: Uint8Array): Promise<string> {
   if (!res.ok) throw new Error(`STT ${res.status}`);
   return ((await res.json()) as { text: string }).text.trim();
 }
+
+/** Saves a personal file on the server (your 3D model or voice sample) so it loads automatically next time. */
+export async function savePersonal(kind: "avatar" | "voice", data: ArrayBuffer | null): Promise<{ ok: boolean; message: string }> {
+  const { http, token } = serverBase();
+  const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+  const init: RequestInit = data ? { method: "POST", headers: { ...headers, "content-type": "application/octet-stream" }, body: data } : { method: "DELETE", headers };
+  try {
+    const res = await fetch(`${http}/${kind}`, init);
+    const body = (await res.json().catch(() => ({}))) as { error?: string; status?: string };
+    if (!res.ok) return { ok: false, message: body.error ?? `Error ${res.status}` };
+    return { ok: true, message: body.status ?? "" };
+  } catch {
+    return { ok: false, message: "No se pudo conectar con el servidor." };
+  }
+}

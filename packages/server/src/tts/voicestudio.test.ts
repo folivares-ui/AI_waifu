@@ -13,7 +13,7 @@ describe("VoiceStudio voice by name", () => {
   });
   it("says clearly when the voice was never created, instead of using another voice", async () => {
     const t = new VoiceStudioTTS(base, async () => [{ id: "a1", name: "Narrador" }]);
-    await expect(t.resolveVoice("Rice Shower")).rejects.toThrow(/no tiene una voz llamada "Rice Shower" \(voces guardadas: "Narrador"\).*voice:create/);
+    await expect(t.resolveVoice("Rice Shower")).rejects.toThrow(/no tiene una voz llamada "Rice Shower" \(voces guardadas: "Narrador"\).*Ajustes/);
   });
   it("finds a voice created after start-up (list refreshed every minute)", async () => {
     let now = 0;
@@ -37,5 +37,34 @@ describe("VoiceStudio voice by name", () => {
     await t.synthesize("Hola, Onii-sama", { voice: "Rice Shower", lang: "es-ES" });
     srv.close();
     expect(bodies[0]).toMatchObject({ url: "/v1/audio/speech", voice: "p_7", input: "Hola, Onii-sama" });
+  });
+});
+
+describe("creating Rice's voice automatically", () => {
+  it("creates the profile from the saved sample once, then reuses it", async () => {
+    const profiles: { id: string; name: string }[] = [];
+    let posted = "";
+    const srv = createServer((req, res) => {
+      if (req.url === "/profiles" && req.method === "GET") return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(profiles));
+      let b = "";
+      req.setEncoding("latin1");
+      req.on("data", (c) => (b += c)).on("end", () => {
+        posted = b;
+        profiles.push({ id: "p_new", name: "Rice Shower" });
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ id: "p_new", name: "Rice Shower" }));
+      });
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const port = (srv.address() as { port: number }).port;
+    const t = new VoiceStudioTTS({ ...base, baseUrl: `http://127.0.0.1:${port}/v1` });
+    const wav = Buffer.concat([Buffer.from("RIFF\0\0\0\0WAVEfmt "), Buffer.alloc(64)]);
+    expect(await t.ensureProfile("Rice Shower", wav)).toEqual({ status: "created", id: "p_new" });
+    expect(posted).toMatch(/name="name"\r\n\r\nRice Shower/);
+    expect(posted).toMatch(/name="kind"\r\n\r\nclone/);
+    expect(posted).toMatch(/name="ref_audio"; filename="voice-ref.wav"/);
+    expect(await t.ensureProfile("rice shower", wav)).toEqual({ status: "exists", id: "p_new" });
+    expect(await t.resolveVoice("Rice Shower")).toBe("p_new");
+    srv.close();
+    expect(await new VoiceStudioTTS(base).ensureProfile("Rice Shower", wav)).toEqual({ status: "unreachable" });
   });
 });

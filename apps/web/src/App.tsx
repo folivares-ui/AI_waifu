@@ -5,7 +5,7 @@ import { AvatarStage } from "./AvatarStage";
 import { GESTURE_EMOJI, GestureCamera } from "./gestures";
 import { CameraIcon, CloseIcon, EyeIcon, GearIcon, MicIcon, RoseIcon, ScreenIcon, SendIcon, StopIcon, VideoIcon } from "./icons";
 import { startMic, type MicHandle } from "./mic";
-import { transcribe } from "./net";
+import { savePersonal, transcribe } from "./net";
 import { ClipPlayer } from "./player";
 import { ScreenShare } from "./screen";
 import { useSoul } from "./useSoul";
@@ -18,6 +18,7 @@ export function App() {
   const [speaking, setSpeaking] = useState(false);
   const [listening, setListening] = useState(false);
   const [headphones, setHeadphones] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<string>();
   const [status, setStatus] = useState("");
   const [text, setText] = useState("");
   const [micError, setMicError] = useState<string>();
@@ -440,10 +441,29 @@ export function App() {
             <label className="row file">
               <span>
                 Cambiar modelo 3D
-                <small>Carga otro archivo .vrm solo para esta sesion.</small>
+                <small>Elige un archivo .vrm: se guarda y se usara cada vez que abras la app.</small>
               </span>
               <span className="btn">Elegir .vrm</span>
               <input type="file" accept=".vrm,.glb" hidden onChange={(e) => e.target.files?.[0] && window.dispatchEvent(new CustomEvent("waifu:load-model", { detail: e.target.files[0] }))} />
+            </label>
+            <label className="row file">
+              <span>
+                Voz de {soul.name}
+                <small>{voiceStatus ?? "Muestra .wav de su voz (5-15 s, solo voz, sin musica). Se guarda y crea su voz en VoiceStudio; no hace falta volver a cargarla."}</small>
+              </span>
+              <span className="btn">Elegir .wav</span>
+              <input
+                type="file"
+                accept=".wav,audio/wav"
+                hidden
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  setVoiceStatus("Guardando la voz...");
+                  const r = await savePersonal("voice", await f.arrayBuffer());
+                  setVoiceStatus(r.ok ? `Guardada. ${r.message}` : `No se guardo: ${r.message}`);
+                }}
+              />
             </label>
             <div className="row info">
               <span>

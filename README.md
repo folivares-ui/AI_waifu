@@ -6,7 +6,7 @@ a **brain** (swappable LLM: cloud or local), and **bodies** (clients: web today;
 ## Status: phase 2 (voice + anime avatar)
 
 Works today:
-- **Anime avatar (VRM, 3D):** renders any VRM 0.x/1.0 model with expressions (happy, sad, angry, surprised, shy, thinking), blinking, gaze, idle motion and lip-sync driven by the loudness of her actual voice. A sample model is fetched with `npm run avatar:sample`; use your own character by copying a `.vrm` to `apps/web/public/avatars/default.vrm` or with the "Cargar modelo VRM" button. Without a model a simple 2D SVG face is shown.
+- **Anime avatar (VRM, 3D):** renders any VRM 0.x/1.0 model with expressions (happy, sad, angry, surprised, shy, thinking), blinking, gaze, idle motion and lip-sync driven by the loudness of her actual voice. A sample model is fetched with `npm run avatar:sample`; use your own character by copying a `.vrm` to `apps/web/public/avatars/default.vrm` or with Ajustes → "Cambiar modelo 3D" (the model you pick is saved in `data/avatars/` and loads every time). Without a model a simple 2D SVG face is shown.
 - **Server-side voice pipeline:** mic → echo-cancelled capture → voice-activity detection → WAV → your STT server → LLM → sentence-by-sentence TTS → ordered audio playback. If STT/TTS are not configured, it falls back to the browser's Web Speech API / built-in voices, so nothing breaks.
 - **Barge-in:** talk over her to interrupt (VAD threshold is raised while she speaks, plus a transcript echo filter so she does not answer her own voice). "Callar" cuts audio instantly.
 - Soul file (`souls/default.soul.json`), local long-term memory (`data/memory.json`), swappable brains (Anthropic, Ollama, offline mock).
@@ -140,6 +140,8 @@ npm run tts:test -w @waifu/server -- "Hola, soy tu companera"   # writes data/tt
 - If it is not running, the server reports "cannot reach http://localhost:3900 ... is the voice server running?" and she falls back to the browser voice.
 
 ### Rice Shower's voice
+**Easiest:** with VoiceStudio open, go to Ajustes → "Voz de Rice Shower" and choose a `.wav` sample. It is saved in `data/voices/voice-ref.wav` and her voice is created in VoiceStudio automatically (also at every start if it is missing), so you never upload it again.
+
 Reference clips cut from the voice sample you provided live in `data/voices/rice-shower/` (git-ignored: they are someone else's recordings, keep them private). Only the clean narration part was used (mono, no music or effects); `rice-ref-2.wav` (7 s, the most expressive) is the recommended one, the others are alternatives. With VoiceStudio open:
 ```bash
 npm run voice:create -- --file data/voices/rice-shower/rice-ref-2.wav --name "Rice Shower"

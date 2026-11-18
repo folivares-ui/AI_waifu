@@ -99,8 +99,7 @@ export class VoiceStudioTTS extends OpenAICompatibleTTS {
 
   private async list() {
     if (!this.profiles || this.now() - this.profiles.at > 60_000) {
-      const root = this.vs.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
-      this.profiles = { at: this.now(), list: await this.fetchProfiles(root).catch(() => undefined) };
+      this.profiles = { at: this.now(), list: await this.fetchProfiles(this.root()).catch(() => undefined) };
     }
     return this.profiles.list;
   }
@@ -113,8 +112,35 @@ export class VoiceStudioTTS extends OpenAICompatibleTTS {
     if (found) return String(found.id);
     const names = list.map((p) => `"${p.name}"`).join(", ") || "ninguna";
     throw new Error(
-      `VoiceStudio no tiene una voz llamada "${voice}" (voces guardadas: ${names}). Creala con: npm run voice:create -- --file data/voices/rice-shower/rice-ref-2.wav --name "${voice}"`,
+      `VoiceStudio no tiene una voz llamada "${voice}" (voces guardadas: ${names}). Carga su muestra .wav en Ajustes > "Voz de..." de la app y se creara sola.`,
     );
+  }
+
+  /**
+   * Makes sure VoiceStudio has a cloned voice called `name`, creating it from `wav` if missing (POST /profiles,
+   * the same fields as scripts/voicestudio-voice.mjs). An existing voice with that name is never replaced.
+   */
+  async ensureProfile(name: string, wav: Buffer, opts: { refText?: string; language?: string } = {}): Promise<{ status: "exists" | "created"; id: string } | { status: "unreachable" }> {
+    this.profiles = undefined;
+    const list = await this.list();
+    if (!list) return { status: "unreachable" };
+    const found = list.find((p) => String(p.name).toLowerCase() === name.toLowerCase());
+    if (found) return { status: "exists", id: String(found.id) };
+    const form = new FormData();
+    form.append("name", name);
+    form.append("kind", "clone");
+    form.append("language", opts.language ?? "Auto");
+    form.append("ref_text", opts.refText ?? "");
+    form.append("ref_audio", new Blob([new Uint8Array(wav)], { type: "audio/wav" }), "voice-ref.wav");
+    const res = await fetch(`${this.root()}/profiles`, { method: "POST", body: form, signal: AbortSignal.timeout(120_000) });
+    if (!res.ok) throw new Error(`VoiceStudio no pudo crear la voz (${res.status}): ${(await res.text()).slice(0, 200)}`);
+    const created = (await res.json()) as { id: string };
+    this.profiles = undefined;
+    return { status: "created", id: String(created.id) };
+  }
+
+  private root() {
+    return this.vs.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
   }
 
   async synthesize(text: string, opts: TTSOptions, signal?: AbortSignal): Promise<TTSResult> {

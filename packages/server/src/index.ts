@@ -1,6 +1,6 @@
 import "./env.js"; // must stay first: loads .env before other modules read process.env
 import { isLoopbackHost, makeAuthorizer } from "./auth.js";
-import { existsSync, readFileSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { networkInterfaces } from "node:os";
@@ -17,6 +17,7 @@ import { createStaticHandler } from "./static.js";
 import { browserForShutdown, createToolFactory, onAllClientsGone } from "./tools/index.js";
 import { createSTT } from "./stt/index.js";
 import { createTTS, VoiceStudioTTS } from "./tts/index.js";
+import { avatarFile, currentVoiceSample, isGlb, isWav, MAX_AVATAR_BYTES, MAX_VOICE_BYTES, removeIfExists, saveAtomic, voiceFile } from "./personal.js";
 
 import { appPath, userOrApp, userPath } from "./paths.js";
 const port = Number(process.env.PORT ?? 8787);
@@ -52,11 +53,20 @@ const llm = createLLM(process.env, (s) => {
 });
 const tts = createTTS();
 const stt = createSTT();
+const voiceName = soul.voice.ttsVoice ?? process.env.TTS_VOICE ?? "default";
+/** Creates Rice's voice in VoiceStudio from the saved sample if it is not there yet (no need to upload it again). */
+async function ensureVoice(sample = currentVoiceSample()): Promise<string> {
+  if (!(tts instanceof VoiceStudioTTS)) return "VoiceStudio no esta configurado (TTS_PROVIDER=voicestudio)";
+  if (!sample || voiceName === "default") return "no hay muestra de voz guardada";
+  const r = await tts.ensureProfile(voiceName, readFileSync(sample));
+  if (r.status === "unreachable") return "VoiceStudio no esta abierto: la voz se creara la proxima vez que arranques con VoiceStudio abierto";
+  return r.status === "created" ? `voz "${voiceName}" creada en VoiceStudio` : `VoiceStudio ya tiene la voz "${voiceName}"`;
+}
 if (tts instanceof VoiceStudioTTS) {
-  const wanted = soul.voice.ttsVoice ?? process.env.TTS_VOICE ?? "default";
-  tts
-    .resolveVoice(wanted)
-    .then((id) => console.log(`[voice] VoiceStudio: "${wanted}" -> ${id === wanted ? "sent as given (could not list its voices: is VoiceStudio open?)" : `profile ${id}`}`))
+  ensureVoice()
+    .then((m) => console.log(`[voice] ${m}`))
+    .then(() => tts.resolveVoice(voiceName))
+    .then((id) => console.log(`[voice] VoiceStudio: "${voiceName}" -> ${id === voiceName ? "sent as given (could not list its voices: is VoiceStudio open?)" : `profile ${id}`}`))
     .catch((e) => console.warn(`[voice] ${e instanceof Error ? e.message : e}`));
 }
 const makeTools = createToolFactory();
@@ -71,7 +81,7 @@ function cors(req: IncomingMessage, res: ServerResponse) {
   if (origin && (token || allowedOrigins.has(origin))) {
     res.setHeader("access-control-allow-origin", origin);
     res.setHeader("access-control-allow-headers", "authorization, content-type");
-    res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
+    res.setHeader("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
   }
 }
 
@@ -105,7 +115,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
   cors(req, res);
   const path = new URL(req.url ?? "", "http://x").pathname;
   if (req.method === "OPTIONS") return void res.writeHead(204).end();
-  const isApi = path === "/health" || path === "/stt";
+  const isApi = path === "/health" || path === "/stt" || path === "/avatar" || path === "/voice";
   if (isApi && !authorized(req)) return json(res, 403, { error: "forbidden" });
 
   if (path === "/health") return json(res, 200, { ok: true, soul: soul.name, llm: llm.name, tts: tts?.name ?? null, stt: stt?.name ?? null, memories: memory.size });
@@ -120,6 +130,40 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
     } catch (err) {
       const tooLarge = err instanceof Error && err.message === "too large";
       return json(res, tooLarge ? 413 : 502, { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  // Your own 3D model: saved once, loaded every time (overrides the one built into the app).
+  if (path === "/avatars/default.vrm" && (req.method === "GET" || req.method === "HEAD") && existsSync(avatarFile())) {
+    if (!authorized(req)) return json(res, 403, { error: "forbidden" });
+    res.writeHead(200, { "content-type": "model/gltf-binary", "cache-control": "no-store" });
+    if (req.method === "HEAD") return void res.end();
+    return void createReadStream(avatarFile()).pipe(res);
+  }
+  if (path === "/avatar" && req.method === "POST") {
+    try {
+      const body = await readBody(req, MAX_AVATAR_BYTES);
+      if (!isGlb(body)) return json(res, 400, { error: "Ese archivo no es un modelo VRM/GLB valido." });
+      saveAtomic(avatarFile(), body);
+      console.log(`[avatar] saved your model (${(body.length / 1e6).toFixed(1)} MB)`);
+      return json(res, 200, { saved: true });
+    } catch (err) {
+      const tooLarge = err instanceof Error && err.message === "too large";
+      return json(res, tooLarge ? 413 : 500, { error: tooLarge ? "El modelo es demasiado grande (max. 150 MB)." : String(err) });
+    }
+  }
+  if (path === "/avatar" && req.method === "DELETE") return json(res, 200, { removed: removeIfExists(avatarFile()) });
+  if (path === "/voice" && req.method === "POST") {
+    try {
+      const body = await readBody(req, MAX_VOICE_BYTES);
+      if (!isWav(body)) return json(res, 400, { error: "La muestra de voz debe ser un archivo .wav." });
+      saveAtomic(voiceFile(), body);
+      let status = await ensureVoice(voiceFile()).catch((e) => (e instanceof Error ? e.message : String(e)));
+      if (status.startsWith("VoiceStudio ya tiene")) status += ". Para usar la nueva muestra, borra esa voz en VoiceStudio y vuelve a cargarla aqui";
+      console.log(`[voice] sample saved; ${status}`);
+      return json(res, 200, { saved: true, status });
+    } catch (err) {
+      const tooLarge = err instanceof Error && err.message === "too large";
+      return json(res, tooLarge ? 413 : 500, { error: tooLarge ? "La muestra es demasiado grande (max. 20 MB)." : String(err) });
     }
   }
   if (serveStatic?.(req, res, path)) return;
