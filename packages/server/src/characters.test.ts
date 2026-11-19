@@ -16,13 +16,17 @@ const setup = () => {
 };
 
 describe("characters", () => {
-  it("ships Rice Shower (default) and Agnes Tachyon; old example souls are hidden", () => {
+  it("ships Rice Shower (default), Agnes Tachyon and Rebecca; old example souls are hidden", () => {
     const { c } = setup();
     const list = c.list();
     expect(list.map((x) => [x.id, x.name, x.builtIn])).toEqual([
       ["agnes-tachyon", "Agnes Tachyon", true],
       ["default", "Rice Shower", true],
+      ["rebecca", "Rebecca", true],
     ]);
+    const rebecca = c.load("rebecca");
+    expect(rebecca.owner?.honorific).toBe("choom");
+    expect(rebecca.growth?.map((t) => t.id)).toEqual(["calma", "apertura", "cercania"]);
     expect(list.find((x) => x.active)?.id).toBe(DEFAULT_ID);
     const agnes = c.load("agnes-tachyon");
     expect(agnes.owner?.honorific).toBe("Morumotto-kun");
