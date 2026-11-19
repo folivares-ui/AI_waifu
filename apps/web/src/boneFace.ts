@@ -102,28 +102,36 @@ export class BoneFaceRig {
     const candidates: THREE.Object3D[] = [];
     (vrm.humanoid.getRawBoneNode("head") ?? vrm.scene).traverse((o) => candidates.push(o));
 
+    const add = (channel: Channel, node: THREE.Object3D, move: { mm: [number, number, number] } | { rot: [number, number, number] }) => {
+      if (!node.parent) return;
+      let d = byNode.get(node);
+      if (!d) {
+        d = { node, restPos: node.position.clone(), restQuat: node.quaternion.clone(), offsets: [], rotations: [] };
+        byNode.set(node, d);
+      }
+      const parentInv = node.parent.getWorldQuaternion(new THREE.Quaternion()).invert();
+      if ("mm" in move) {
+        // World-space offset -> the bone's parent space, so it keeps working when the head turns.
+        const scale = node.parent.getWorldScale(new THREE.Vector3());
+        d.offsets.push({ channel, local: new THREE.Vector3(...move.mm).multiplyScalar(0.001).applyQuaternion(parentInv).divide(scale) });
+      } else {
+        const world = new THREE.Quaternion().setFromEuler(new THREE.Euler(...move.rot));
+        const target = parentInv.clone().multiply(world).multiply(node.getWorldQuaternion(new THREE.Quaternion()));
+        d.rotations.push({ channel, delta: d.restQuat.clone().invert().multiply(target) });
+      }
+      this.channels.add(channel);
+    };
+
+    // Family 1 (fixed offsets tuned by eye).
     for (const channel of CHANNEL_NAMES) {
       for (const move of CHANNELS[channel] as Move[]) {
-        for (const node of candidates) {
-          if (!node.parent || !move.bones.test(baseName(node.name))) continue;
-          let d = byNode.get(node);
-          if (!d) {
-            d = { node, restPos: node.position.clone(), restQuat: node.quaternion.clone(), offsets: [], rotations: [] };
-            byNode.set(node, d);
-          }
-          const parentInv = node.parent.getWorldQuaternion(new THREE.Quaternion()).invert();
-          if ("mm" in move) {
-            // World-space offset -> the bone's parent space, so it keeps working when the head turns.
-            const scale = node.parent.getWorldScale(new THREE.Vector3());
-            d.offsets.push({ channel, local: new THREE.Vector3(...move.mm).multiplyScalar(0.001).applyQuaternion(parentInv).divide(scale) });
-          } else {
-            const world = new THREE.Quaternion().setFromEuler(new THREE.Euler(...move.rot));
-            const target = parentInv.clone().multiply(world).multiply(node.getWorldQuaternion(new THREE.Quaternion()));
-            d.rotations.push({ channel, delta: d.restQuat.clone().invert().multiply(target) });
-          }
-          this.channels.add(channel);
-        }
+        for (const node of candidates) if (move.bones.test(baseName(node.name))) add(channel, node, move);
       }
+    }
+    // Family 2: offsets computed from the model's own geometry.
+    if (this.channels.size === 0) {
+      const head = vrm.humanoid.getRawBoneNode("head");
+      if (head) for (const m of geometryMoves(head, candidates)) add(m.channel, m.node, m);
     }
     this.driven = [...byNode.values()];
   }
@@ -148,4 +156,91 @@ export class BoneFaceRig {
       }
     }
   }
+}
+
+// ---------- family 2: "LT eyelid A", "LU eyelid A", "L eyebrow A", "LT lip A", "jaw A"... -----------------------
+
+/** Names like "LT_eyelid_A_12" (three.js turns spaces into "_"; exporters append an index). */
+const fam2 = (n: string) => n.replace(/_\d{1,4}$/, "").replace(/_/g, " ").trim();
+
+type GeoMove = { channel: Channel; node: THREE.Object3D } & ({ mm: [number, number, number] } | { rot: [number, number, number] });
+
+/**
+ * Eyelids, eyebrows, lips and jaw named "LT/LU/RT/RU eyelid A..D", "LI/LO eyelid", "L/R browskin A..E",
+ * "T/U lip", "LT/LU lip A..D", "jaw A". Instead of fixed offsets, each movement is measured on the model:
+ * to blink, every upper-lid bone moves down to the lower lid right below it, so it fits any face size or eye shape.
+ */
+export function geometryMoves(head: THREE.Object3D, nodes: THREE.Object3D[]): GeoMove[] {
+  head.updateMatrixWorld(true);
+  const origin = head.getWorldPosition(new THREE.Vector3());
+  const pos = (o: THREE.Object3D) => o.getWorldPosition(new THREE.Vector3()).sub(origin).multiplyScalar(1000); // mm
+  const find = (re: RegExp) => nodes.filter((o) => re.test(fam2(o.name)));
+  const out: GeoMove[] = [];
+  const mm = (channel: Channel, node: THREE.Object3D, x: number, y: number, z: number) => out.push({ channel, node, mm: [x, y, z] });
+
+  for (const side of ["L", "R"]) {
+    const upper = find(new RegExp(`^${side}T eyelid [A-Z]$`));
+    const lower = find(new RegExp(`^${side}U eyelid [A-Z]$`));
+    if (upper.length < 2 || lower.length < 2) continue;
+    const corners = find(new RegExp(`^${side}[IO] eyelid$`));
+    // Lower-lid line (corners included), to know how far each upper-lid bone has to travel.
+    const line = [...lower, ...corners].map((o) => pos(o)).sort((a, b) => a.x - b.x);
+    const lowerY = (x: number) => {
+      if (x <= line[0].x) return line[0].y;
+      for (let i = 1; i < line.length; i++) {
+        if (x <= line[i].x) {
+          const t = (x - line[i - 1].x) / (line[i].x - line[i - 1].x || 1);
+          return line[i - 1].y + t * (line[i].y - line[i - 1].y);
+        }
+      }
+      return line[line.length - 1].y;
+    };
+    const gaps = upper.map((o) => Math.max(0, pos(o).y - lowerY(pos(o).x)));
+    const meanGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    upper.forEach((o, i) => {
+      const gap = gaps[i];
+      mm("blink", o, 0, -0.88 * gap, 0);
+      mm("eyeSmile", o, 0, -0.5 * gap, 0);
+      mm("eyeWide", o, 0, 0.18 * meanGap, 0);
+    });
+    for (const o of lower) {
+      mm("blink", o, 0, 0.12 * meanGap, 0);
+      mm("eyeSmile", o, 0, 0.32 * meanGap, 0); // the lower lid arches up: anime "smiling eyes"
+      mm("eyeWide", o, 0, -0.08 * meanGap, 0);
+    }
+    // Eyebrows: the skin bone carries the brow. Inner = closest to the nose.
+    const brows = find(new RegExp(`^${side} browskin [A-Z]$`)).sort((a, b) => Math.abs(pos(a).x) - Math.abs(pos(b).x));
+    const unit = Math.max(3, Math.min(8, meanGap * 0.45)); // ~6 mm on a typical face
+    brows.forEach((o, i) => {
+      const t = brows.length > 1 ? i / (brows.length - 1) : 0; // 0 inner .. 1 outer
+      mm("browUp", o, 0, unit, 0);
+      mm("browAngry", o, 0, unit * (-0.9 + 1.4 * t), 0);
+      mm("browSad", o, 0, unit * (0.9 - 1.4 * t), 0);
+    });
+  }
+
+  // Mouth: the outermost lip bones are the corners.
+  const lips = find(/^(L|R)[TU] lip [A-Z]$/);
+  if (lips.length) {
+    const width = Math.max(...lips.map((o) => Math.abs(pos(o).x)));
+    for (const o of lips) {
+      const p = pos(o);
+      const t = Math.abs(p.x) / (width || 1); // 0 centre .. 1 corner
+      const out_ = Math.sign(p.x);
+      const k = t * t; // mostly the corners
+      mm("mouthSmile", o, out_ * 1.5 * k, 3 * k, 0);
+      mm("mouthFrown", o, 0, -2.6 * k, 0);
+      mm("mouthNarrow", o, -out_ * 2.5 * k, 0, 0);
+      mm("mouthWide", o, out_ * 2.5 * k, 0.4 * k, 0);
+    }
+  }
+  // Jaw: rotating it opens the mouth (the lower lip, lower teeth and tongue hang from it).
+  const jaw = find(/^jaw [A-Z]$/)[0];
+  if (jaw) {
+    const lowerLip = find(/^U lip$/)[0];
+    // Opening angle for ~11 mm at the lower lip, whatever the distance between the jaw pivot and the lips.
+    const reach = lowerLip ? Math.max(30, Math.hypot(pos(lowerLip).y - pos(jaw).y, pos(lowerLip).z - pos(jaw).z)) : 100;
+    out.push({ channel: "mouthOpen", node: jaw, rot: [11 / reach, 0, 0] });
+  }
+  return out;
 }

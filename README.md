@@ -188,6 +188,7 @@ Characters are not static: each has a few traits with a level from 0 to 100 (Ric
 
 ## Models converted from other formats
 - **No humanoid bones:** some converted `.vrm` files (e.g. from Sketchfab exports) have an empty humanoid bone list, so no VRM viewer can load them. When you load one in Ajustes, the server recognises the bones by their names (hips, spine, arms, legs, fingers, eyes) and fills the list in; models saved earlier are repaired the first time they are shown. If the bones cannot be recognised, the app says which ones are missing.
+- **Faces without expressions:** besides the game rig of Rice and Agnes, faces named "LT/LU eyelid A..D", "L/R browskin A..E", "LT/LU lip", "jaw A" (e.g. Midnight's model) are animated too; their movements are computed from the model's own geometry (a blink brings each upper-lid bone down to the lower lid below it).
 - **Parts of the model:** Ajustes → "Partes del modelo" lists each part (hair, clothes, mask, a weapon...) with a checkbox. Parts that look like weapons are hidden by default; your choice is saved per character.
 
 ## Japanese voice with Spanish subtitles
