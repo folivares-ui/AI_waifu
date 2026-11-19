@@ -10,6 +10,7 @@ import { ClipPlayer } from "./player";
 import { ScreenShare } from "./screen";
 import { storedSpeechLang, useSoul } from "./useSoul";
 import { DialogBox } from "./DialogBox";
+import { CharacterPicker } from "./Characters";
 import { addLine, markStarted, revealStale, type Dialog } from "./dialog";
 import { Listener, Speaker, sttSupported } from "./voice";
 
@@ -127,6 +128,10 @@ export function App() {
   };
 
   // Errors are shown as a toast that goes away by itself.
+  // Another character: her dialog box starts empty.
+  useEffect(() => {
+    updateDialog(() => ({ turn: -1, lines: [] }));
+  }, [soul.name]);
   const spokenLang = chosenSpokenLang ?? soul.voice.speechLang ?? soul.voice.lang;
   spokenLangRef.current = spokenLang;
   // Sentences that are not being played (muted, no voice, an error) still appear after a moment.
@@ -354,7 +359,7 @@ export function App() {
 
   return (
     <div className="app">
-      <AvatarStage emotion={emotion} speaking={speaking} listening={listening} getLevel={getLevel} onTouch={(r) => soul.sendTouch(r)} />
+      <AvatarStage key={soul.name} character={soul.name} emotion={emotion} speaking={speaking} listening={listening} getLevel={getLevel} onTouch={(r) => soul.sendTouch(r)} />
       <div className="veil veil-top" aria-hidden="true" />
       <div className="veil veil-bottom" aria-hidden="true" />
 
@@ -506,6 +511,7 @@ export function App() {
                 <CloseIcon size={18} />
               </button>
             </header>
+            <CharacterPicker current={soul.name} />
             <label className="row">
               <span>
                 Uso auriculares
@@ -516,7 +522,7 @@ export function App() {
             <label className="row file">
               <span>
                 Cambiar modelo 3D
-                <small>Elige un archivo .vrm: se guarda y se usara cada vez que abras la app.</small>
+                <small>Elige un archivo .vrm para {soul.name}: se guarda y se usara cada vez que abras la app.</small>
               </span>
               <span className="btn">Elegir .vrm</span>
               <input type="file" accept=".vrm,.glb" hidden onChange={(e) => e.target.files?.[0] && window.dispatchEvent(new CustomEvent("waifu:load-model", { detail: e.target.files[0] }))} />

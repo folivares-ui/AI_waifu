@@ -118,6 +118,16 @@ export class Session {
     this.tools = typeof opts.tools === "function" ? opts.tools(ctx) : (opts.tools ?? []);
   }
 
+  /** Becomes another character (from the app's settings): the current answer stops and the conversation restarts. */
+  setCharacter(soul: Soul, memory: MemoryStore) {
+    this.abort?.abort();
+    for (const [, answer] of this.approvalWaiters) answer(false);
+    this.history = [];
+    this.soul = soul;
+    this.memory = memory;
+    this.hello();
+  }
+
   hello() {
     this.send({ type: "ready", soul: { name: this.soul.name, voice: this.soul.voice, names: this.soul.names }, caps: this.caps });
   }

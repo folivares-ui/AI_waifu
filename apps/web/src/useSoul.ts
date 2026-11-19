@@ -84,7 +84,11 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion,
           // Re-apply the spoken language chosen in the settings (kept on this device).
           const chosen = storedSpeechLang();
           if (chosen) ws.current?.send(JSON.stringify({ type: "speech_lang", lang: chosen }));
-          setName(m.soul.name);
+          // Another character now: her conversation starts fresh (the server restarted it too).
+          setName((prev) => {
+            if (prev !== "..." && prev !== m.soul.name) setLines([]);
+            return m.soul.name;
+          });
           setVoice(m.soul.voice);
           setNames(m.soul.names);
           setCaps(m.caps);

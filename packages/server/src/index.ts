@@ -4,7 +4,7 @@ import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { networkInterfaces } from "node:os";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import qrcode from "qrcode-terminal";
 import { WebSocketServer } from "ws";
 import type { Capabilities, ClientMessage } from "@waifu/core";
@@ -12,15 +12,16 @@ import { ActionLog } from "./actionLog.js";
 import { createLLM } from "./llm/index.js";
 import { MemoryStore } from "./memory.js";
 import { Session } from "./session.js";
-import { loadSoul, sttHint } from "./soul.js";
+import { sttHint } from "./soul.js";
+import { Characters, DEFAULT_ID, type NewCharacter } from "./characters.js";
 import { createStaticHandler } from "./static.js";
 import { browserForShutdown, createToolFactory, onAllClientsGone } from "./tools/index.js";
 import { createSTT } from "./stt/index.js";
 import { createTTS, VoiceStudioTTS } from "./tts/index.js";
 import { closeLaunched, ensureVoiceStudio, findVoiceStudio } from "./tts/launcher.js";
-import { avatarFile, currentVoiceSample, isGlb, isWav, MAX_AVATAR_BYTES, MAX_VOICE_BYTES, removeIfExists, saveAtomic, voiceFile } from "./personal.js";
+import { isGlb, isWav, MAX_AVATAR_BYTES, MAX_VOICE_BYTES, removeIfExists, saveAtomic } from "./personal.js";
 
-import { appPath, userOrApp, userPath } from "./paths.js";
+import { appPath, userPath } from "./paths.js";
 const port = Number(process.env.PORT ?? 8787);
 // Loopback only by default. To use from phone/another PC set HOST=0.0.0.0 AND AUTH_TOKEN.
 const host = process.env.HOST ?? "127.0.0.1";
@@ -36,7 +37,29 @@ const allowedOrigins = new Set([
   ...["http", "https"].flatMap((p) => [`${p}://localhost:${port}`, `${p}://127.0.0.1:${port}`]),
 ]);
 
-const soul = loadSoul(userOrApp(process.env.SOUL_FILE ?? "souls/default.soul.json"));
+// Characters (Rice Shower, Agnes Tachyon, yours...): each with her own 3D model, voice and memory.
+const characters = new Characters(
+  appPath("souls"),
+  userPath("souls"),
+  userPath("data"),
+  basename(process.env.SOUL_FILE ?? "default.soul.json").replace(/\.soul\.json$/, ""),
+  process.env.MEMORY_FILE ? resolve(process.env.MEMORY_FILE) : undefined,
+);
+/** Changes who she is in every open window (each character keeps her own memory, model and voice). */
+function switchCharacter(id: string) {
+  if (!characters.exists(id)) throw new Error(`No existe el personaje "${id}".`);
+  characters.setActive(id);
+  if (id === active.id) return;
+  active = loadCharacter(id);
+  for (const s of sessions) s.setCharacter(active.soul, active.memory);
+  console.log(`[characters] now: ${active.soul.name}`);
+  // Her VoiceStudio voice is created from her saved sample if needed.
+  if (tts instanceof VoiceStudioTTS) void ensureVoice(id).then((m) => console.log(`[voice] ${m}`), (e) => console.warn(`[voice] ${e instanceof Error ? e.message : e}`));
+}
+const loadCharacter = (id: string) => ({ id, soul: characters.load(id), memory: new MemoryStore(characters.paths(id).memory) });
+let active = loadCharacter(characters.activeId());
+/** Every open window's conversation, so a character change reaches all of them. */
+const sessions = new Set<Session>();
 // Open windows, so everyone sees when she changes brain.
 const sockets = new Set<import("ws").WebSocket>();
 const notify = (message: string) => {
@@ -47,18 +70,19 @@ const llm = createLLM(process.env, (s) => {
   const [from, target] = [brainName(s.from), brainName(s.target)];
   const message =
     s.to === "fallback"
-      ? `${from} no responde (${s.reason}). Rice sigue con ${target} en este equipo.`
-      : `Rice vuelve a usar ${target}.`;
+      ? `${from} no responde (${s.reason}). ${active.soul.name} sigue con ${target} en este equipo.`
+      : `${active.soul.name} vuelve a usar ${target}.`;
   console.log(`[brain] ${message}`);
   notify(message);
 });
 const tts = createTTS();
 const stt = createSTT();
-const voiceName = soul.voice.ttsVoice ?? process.env.TTS_VOICE ?? "default";
-/** Creates Rice's voice in VoiceStudio from the saved sample if it is not there yet (no need to upload it again). */
-async function ensureVoice(sample = currentVoiceSample()): Promise<string> {
+const voiceNameOf = (id: string) => characters.load(id).voice.ttsVoice ?? process.env.TTS_VOICE ?? "default";
+/** Creates a character's voice in VoiceStudio from her saved sample if it is not there yet (no need to upload it again). */
+async function ensureVoice(id = active.id, sample = characters.voiceSample(id)): Promise<string> {
+  const voiceName = voiceNameOf(id);
   if (!(tts instanceof VoiceStudioTTS)) return "VoiceStudio no esta configurado (TTS_PROVIDER=voicestudio)";
-  if (!sample || voiceName === "default") return "no hay muestra de voz guardada";
+  if (!sample || voiceName === "default") return `no hay muestra de voz guardada para ${characters.load(id).name}`;
   const r = await tts.ensureProfile(voiceName, readFileSync(sample));
   if (r.status === "unreachable") return "VoiceStudio no esta abierto: la voz se creara la proxima vez que arranques con VoiceStudio abierto";
   return r.status === "created" ? `voz "${voiceName}" creada en VoiceStudio` : `VoiceStudio ya tiene la voz "${voiceName}"`;
@@ -72,12 +96,12 @@ const voiceStudioReady: Promise<void> =
     ? ensureVoiceStudio(voiceStudioRoot, { exe: findVoiceStudio(), log: (m) => console.log(`[voice] ${m}`) }).then((r) => {
         if (r.status === "started") {
           launchedVoiceStudio = r.child;
-          console.log("[voice] VoiceStudio was closed: Rice opened it and it is ready");
+          console.log("[voice] VoiceStudio was closed: the app opened it and it is ready");
         } else if (r.status === "timeout") {
           launchedVoiceStudio = r.child;
           console.warn("[voice] VoiceStudio was opened but did not answer within 2 minutes (is it still loading?)");
         } else if (r.status === "not-found") {
-          console.warn("[voice] VoiceStudio is not open and was not found. Open it, or set VOICESTUDIO_PATH in .env so Rice can open it herself.");
+          console.warn("[voice] VoiceStudio is not open and was not found. Open it, or set VOICESTUDIO_PATH in .env so the app can open it itself.");
         }
       })
     : Promise.resolve();
@@ -89,13 +113,12 @@ if (tts instanceof VoiceStudioTTS) {
   voiceStudioReady
     .then(() => ensureVoice())
     .then((m) => console.log(`[voice] ${m}`))
-    .then(() => tts.resolveVoice(voiceName))
-    .then((id) => console.log(`[voice] VoiceStudio: "${voiceName}" -> ${id === voiceName ? "sent as given (could not list its voices: is VoiceStudio open?)" : `profile ${id}`}`))
+    .then(() => tts.resolveVoice(voiceNameOf(active.id)))
+    .then((id) => console.log(`[voice] VoiceStudio: "${voiceNameOf(active.id)}" -> ${id === voiceNameOf(active.id) ? "sent as given (could not list its voices: is VoiceStudio open?)" : `profile ${id}`}`))
     .catch((e) => console.warn(`[voice] ${e instanceof Error ? e.message : e}`));
 }
 const makeTools = createToolFactory();
 const caps: Capabilities = { tts: !!tts, stt: !!stt, vision: !!llm.vision };
-const memory = new MemoryStore(process.env.MEMORY_FILE ?? userPath("data/memory.json"));
 const actionLog = new ActionLog(process.env.ACTIONS_LOG ?? userPath("data/actions.jsonl"));
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 
@@ -139,17 +162,17 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
   cors(req, res);
   const path = new URL(req.url ?? "", "http://x").pathname;
   if (req.method === "OPTIONS") return void res.writeHead(204).end();
-  const isApi = path === "/health" || path === "/stt" || path === "/avatar" || path === "/voice";
+  const isApi = path === "/health" || path === "/stt" || path === "/avatar" || path === "/voice" || path === "/characters" || path.startsWith("/characters/");
   if (isApi && !authorized(req)) return json(res, 403, { error: "forbidden" });
 
-  if (path === "/health") return json(res, 200, { ok: true, soul: soul.name, llm: llm.name, tts: tts?.name ?? null, stt: stt?.name ?? null, memories: memory.size });
+  if (path === "/health") return json(res, 200, { ok: true, soul: active.soul.name, character: active.id, llm: llm.name, tts: tts?.name ?? null, stt: stt?.name ?? null, memories: active.memory.size });
 
   if (path === "/stt" && req.method === "POST") {
     if (!stt) return json(res, 501, { error: "STT not configured" });
     try {
       const audio = await readBody(req, MAX_AUDIO_BYTES);
       if (audio.length < 100) return json(res, 400, { error: "empty audio" });
-      const text = await stt.transcribe(audio, req.headers["content-type"] ?? "audio/wav", { lang: soul.voice.lang, prompt: sttHint(soul) });
+      const text = await stt.transcribe(audio, req.headers["content-type"] ?? "audio/wav", { lang: active.soul.voice.lang, prompt: sttHint(active.soul) });
       return json(res, 200, { text });
     } catch (err) {
       const tooLarge = err instanceof Error && err.message === "too large";
@@ -157,17 +180,52 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
     }
   }
   // Your own 3D model: saved once, loaded every time (overrides the one built into the app).
-  if (path === "/avatars/default.vrm" && (req.method === "GET" || req.method === "HEAD") && existsSync(avatarFile())) {
-    if (!authorized(req)) return json(res, 403, { error: "forbidden" });
-    res.writeHead(200, { "content-type": "model/gltf-binary", "cache-control": "no-store" });
-    if (req.method === "HEAD") return void res.end();
-    return void createReadStream(avatarFile()).pipe(res);
+  // The active character's model. The model built into the app belongs to the default character only.
+  if (path === "/avatars/default.vrm" && (req.method === "GET" || req.method === "HEAD")) {
+    const file = characters.paths(active.id).avatar;
+    if (existsSync(file)) {
+      if (!authorized(req)) return json(res, 403, { error: "forbidden" });
+      res.writeHead(200, { "content-type": "model/gltf-binary", "cache-control": "no-store" });
+      if (req.method === "HEAD") return void res.end();
+      return void createReadStream(file).pipe(res);
+    }
+    if (active.id !== DEFAULT_ID) return json(res, 404, { error: "no model for this character yet" });
+  }
+  // Characters: list, create, switch, delete.
+  if (path === "/characters" && req.method === "GET") return json(res, 200, characters.list());
+  if (path === "/characters" && req.method === "POST") {
+    try {
+      const id = characters.create(JSON.parse((await readBody(req, 64 * 1024)).toString("utf8")) as NewCharacter);
+      console.log(`[characters] created "${id}"`);
+      return json(res, 200, { id });
+    } catch (err) {
+      return json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  if (path === "/characters/active" && req.method === "POST") {
+    try {
+      const { id } = JSON.parse((await readBody(req, 4096)).toString("utf8")) as { id?: string };
+      switchCharacter(String(id ?? ""));
+      return json(res, 200, { id: active.id, name: active.soul.name });
+    } catch (err) {
+      return json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  if (path.startsWith("/characters/") && req.method === "DELETE") {
+    try {
+      const id = decodeURIComponent(path.slice("/characters/".length));
+      characters.remove(id);
+      if (active.id === id) switchCharacter(characters.activeId());
+      return json(res, 200, { removed: id });
+    } catch (err) {
+      return json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+    }
   }
   if (path === "/avatar" && req.method === "POST") {
     try {
       const body = await readBody(req, MAX_AVATAR_BYTES);
       if (!isGlb(body)) return json(res, 400, { error: "Ese archivo no es un modelo VRM/GLB valido." });
-      saveAtomic(avatarFile(), body);
+      saveAtomic(characters.paths(active.id).avatar, body);
       console.log(`[avatar] saved your model (${(body.length / 1e6).toFixed(1)} MB)`);
       return json(res, 200, { saved: true });
     } catch (err) {
@@ -175,13 +233,14 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, tooLarge ? 413 : 500, { error: tooLarge ? "El modelo es demasiado grande (max. 150 MB)." : String(err) });
     }
   }
-  if (path === "/avatar" && req.method === "DELETE") return json(res, 200, { removed: removeIfExists(avatarFile()) });
+  if (path === "/avatar" && req.method === "DELETE") return json(res, 200, { removed: removeIfExists(characters.paths(active.id).avatar) });
   if (path === "/voice" && req.method === "POST") {
     try {
       const body = await readBody(req, MAX_VOICE_BYTES);
       if (!isWav(body)) return json(res, 400, { error: "La muestra de voz debe ser un archivo .wav." });
-      saveAtomic(voiceFile(), body);
-      let status = await ensureVoice(voiceFile()).catch((e) => (e instanceof Error ? e.message : String(e)));
+      const file = characters.paths(active.id).voice;
+      saveAtomic(file, body);
+      let status = await ensureVoice(active.id, file).catch((e) => (e instanceof Error ? e.message : String(e)));
       if (status.startsWith("VoiceStudio ya tiene")) status += ". Para usar la nueva muestra, borra esa voz en VoiceStudio y vuelve a cargarla aqui";
       console.log(`[voice] sample saved; ${status}`);
       return json(res, 200, { saved: true, status });
@@ -204,7 +263,8 @@ wss.on("connection", (ws) => {
   clients++;
   sockets.add(ws);
   clearTimeout(goneTimer);
-  const session = new Session(soul, llm, memory, (m) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m)), { tts, caps, tools: makeTools, watchMinIntervalMs: Number(process.env.WATCH_MIN_INTERVAL_MS ?? 25000), actionLog, approvalTimeoutMs: Number(process.env.APPROVAL_TIMEOUT_MS ?? 120000) });
+  const session = new Session(active.soul, llm, active.memory, (m) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m)), { tts, caps, tools: makeTools, watchMinIntervalMs: Number(process.env.WATCH_MIN_INTERVAL_MS ?? 25000), actionLog, approvalTimeoutMs: Number(process.env.APPROVAL_TIMEOUT_MS ?? 120000) });
+  sessions.add(session);
   session.hello();
   ws.on("message", (data) => {
     try {
@@ -215,6 +275,7 @@ wss.on("connection", (ws) => {
   });
   ws.on("close", () => {
     session.close();
+    sessions.delete(session);
     sockets.delete(ws);
     clients--;
     // A few seconds of grace so a page reload does not close her browser.
@@ -247,7 +308,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 const portBusy = (e: NodeJS.ErrnoException) => {
   if (e.code !== "EADDRINUSE") throw e;
   console.error(
-    `\n[!] El puerto ${port} ya esta en uso: Rice ya esta abierta en otra ventana de PowerShell o en la app de escritorio.\n` +
+    `\n[!] El puerto ${port} ya esta en uso: la app ya esta abierta en otra ventana de PowerShell o en la app de escritorio.\n` +
       `    Cierra la otra (Ctrl+C o cierra la app) y vuelve a intentarlo, o usa otro puerto: pon PORT=8788 en el .env.\n`,
   );
   process.exit(1);
@@ -256,7 +317,7 @@ http.on("error", portBusy);
 wss.on("error", portBusy);
 http.listen(port, host, () => {
   const scheme = secure ? "https" : "http";
-  console.log(`[${soul.name}] soul server on ${scheme}://${host}:${port} | brain=${llm.name} tts=${tts?.name ?? "browser"} stt=${stt?.name ?? "browser"} | memories=${memory.size} | web=${serveWeb ? "served" : "not served (run npm run build)"}`);
+  console.log(`[${active.soul.name}] soul server on ${scheme}://${host}:${port} | brain=${llm.name} tts=${tts?.name ?? "browser"} stt=${stt?.name ?? "browser"} | memories=${active.memory.size} | web=${serveWeb ? "served" : "not served (run npm run build)"}`);
   if (serveWeb && token && host !== "127.0.0.1" && host !== "localhost") {
     // Pairing links for phones/tablets/other PCs on your network. Treat them like a password.
     const ips = Object.values(networkInterfaces()).flat().filter((n) => n && n.family === "IPv4" && !n.internal).map((n) => n!.address);

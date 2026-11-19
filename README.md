@@ -180,6 +180,9 @@ The browser console prints an `[avatar] converted model: ...` line listing what 
 
 Check the license of any model you use: a "CC-BY" tag on a fan upload of a commercial game's character does not necessarily cover the character itself. Keep such models for personal use (the `avatars/` folder is git-ignored, so they are never pushed).
 
+## Characters (Rice Shower, Agnes Tachyon, yours)
+Ajustes → **Personaje**: switch between characters in every open window. Each one keeps **her own** 3D model, voice sample (and VoiceStudio voice) and memory; switching restarts the conversation. Rice Shower and Agnes Tachyon come with the app (`souls/*.soul.json`); **+ Nuevo personaje** creates one from a short form (name, personality, how she calls you, other names, Japanese voice). After choosing a character, load her `.vrm` and `.wav` in the same settings. Characters you created can be deleted (with their files); the shipped ones cannot. Files: `data/characters/<id>/` (Rice keeps `data/avatars`, `data/voices` and `data/memory.json`), your souls in `souls/` of the user folder.
+
 ## Japanese voice with Spanish subtitles
 Rice speaks **Japanese** (like in the anime) while her words are shown in **Spanish**; you keep talking to her in Spanish. Each sentence is translated in character (she calls herself 「ライス」 and you 「お兄さま」) by the same brain just before it is spoken, so it costs one extra short request per sentence and adds a little delay. Switch it in Ajustes → "Hablar en japones" (remembered on that device), with `SPEECH_LANG` in `.env`, or with `speechLang`/`speechStyle` in the soul file.
 - Browser voice: needs a Japanese voice. Edge and Chrome usually include one (online natural voices); on Windows you can add one in Configuración → Hora e idioma → Voz → Agregar voces → Japonés. The app tells you if none is found.

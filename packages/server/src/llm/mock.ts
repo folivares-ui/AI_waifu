@@ -8,7 +8,7 @@ export class MockProvider implements LLMProvider {
     // Spoken-language translation (speech.ts): the demo brain cannot translate. For Japanese it says a fixed
     // demo line (so the voice and the dialog box can be tried); for other languages it returns the line unchanged.
     if (req.system.startsWith("TRANSLATE_FOR_SPEECH")) {
-      yield /spoken Japanese/.test(req.system) ? "（デモ）ライス、がんばります。" : asText(req.messages.at(-1)?.content ?? "");
+      yield /spoken Japanese/.test(req.system) ? "（デモ）がんばります。" : asText(req.messages.at(-1)?.content ?? "");
       return;
     }
     // Demo reactions (no API key): petting and gestures, in Rice Shower's style.

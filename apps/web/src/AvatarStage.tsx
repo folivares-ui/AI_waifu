@@ -9,13 +9,14 @@ const VrmAvatar = lazy(() => import("./VrmAvatar").then((m) => ({ default: m.Vrm
 const isGlb = (b: ArrayBuffer) => new TextDecoder().decode(b.slice(0, 4)) === "glTF";
 
 /** Shows the anime VRM model if present at /avatars/default.vrm (or loaded by the user), else the simple SVG face. */
-export function AvatarStage(props: AvatarProps) {
+export function AvatarStage({ character = "", ...props }: AvatarProps & { character?: string }) {
   const [model, setModel] = useState<ArrayBuffer | null>(null);
   const [fx, setFx] = useState<(TouchFx & { id: number })[]>([]);
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/avatars/default.vrm", { headers: serverBase().token ? { authorization: `Bearer ${serverBase().token}` } : {} })
+    // The model of the active character (the query only keeps browsers from reusing another character's model).
+    fetch(`/avatars/default.vrm?c=${encodeURIComponent(character)}`, { headers: serverBase().token ? { authorization: `Bearer ${serverBase().token}` } : {} })
       .then((r) => (r.ok ? r.arrayBuffer() : null))
       .then((b) => !cancelled && b && isGlb(b) && setModel(b)) // dev servers may answer 200 with index.html
       .catch(() => {});

@@ -37,3 +37,41 @@ export async function savePersonal(kind: "avatar" | "voice", data: ArrayBuffer |
     return { ok: false, message: "No se pudo conectar con el servidor." };
   }
 }
+
+export interface CharacterInfo {
+  id: string;
+  name: string;
+  builtIn: boolean;
+  hasAvatar: boolean;
+  hasVoice: boolean;
+  active: boolean;
+}
+
+export interface NewCharacter {
+  name: string;
+  persona: string;
+  honorific?: string;
+  aliases?: string[];
+  speechLang?: string;
+  speechStyle?: string;
+}
+
+/** Calls the server's character API. Errors come back as readable Spanish messages. */
+async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const { http, token } = serverBase();
+  const headers: Record<string, string> = { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(init.body ? { "content-type": "application/json" } : {}) };
+  let res: Response;
+  try {
+    res = await fetch(`${http}${path}`, { ...init, headers });
+  } catch {
+    throw new Error("No se pudo conectar con el servidor.");
+  }
+  const body = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (!res.ok) throw new Error(body.error ?? `Error ${res.status}`);
+  return body;
+}
+
+export const listCharacters = () => api<CharacterInfo[]>("/characters");
+export const selectCharacter = (id: string) => api<{ id: string; name: string }>("/characters/active", { method: "POST", body: JSON.stringify({ id }) });
+export const createCharacter = (c: NewCharacter) => api<{ id: string }>("/characters", { method: "POST", body: JSON.stringify(c) });
+export const deleteCharacter = (id: string) => api<{ removed: string }>(`/characters/${encodeURIComponent(id)}`, { method: "DELETE" });

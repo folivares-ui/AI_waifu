@@ -58,7 +58,7 @@ export async function ensureVoiceStudio(
   opts.log?.(`VoiceStudio is closed: opening ${exe} ...`);
   const child = launch(exe);
   child.on("error", (e) => opts.log?.(`could not open VoiceStudio (${e.message}). Check VOICESTUDIO_PATH in .env.`));
-  child.on("exit", (code) => opts.log?.(`the VoiceStudio program Rice opened has exited (code ${code}); if its window is not open, open it by hand and tell what happened.`));
+  child.on("exit", (code) => opts.log?.(`the VoiceStudio program the app opened has exited (code ${code}); if its window is not open, open it by hand and tell what happened.`));
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const deadline = Date.now() + (opts.timeoutMs ?? 120_000); // loading its voice models can take a while
   while (Date.now() < deadline) {

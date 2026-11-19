@@ -50,7 +50,7 @@ export function describeEgress(action: string, rawUrl: unknown, query?: Record<s
   for (const [k, v] of Object.entries(query ?? {})) url.searchParams.set(k, String(v));
   return {
     summary: `${action} ${url.hostname}`,
-    details: `${url.href}\n\nRice ya leyo otro contenido en esta respuesta (documentos, paginas o la pantalla). Revisa que la direccion no lleve datos tuyos antes de permitirlo.`,
+    details: `${url.href}\n\nYa leyo otro contenido en esta respuesta (documentos, paginas o la pantalla). Revisa que la direccion no lleve datos tuyos antes de permitirlo.`,
   };
 }
 
