@@ -38,13 +38,21 @@ export function sttHint(soul: Soul): string {
 
 /** Who is who, and how to tell typed messages from voices that may belong to someone else. */
 function speakerRules(soul: Soul): string {
-  const hon = soul.owner?.honorific || "your owner";
+  const honorific = soul.owner?.honorific?.trim();
   const ownerName = soul.owner?.name?.trim();
-  const call = ownerName ? `"${hon}" or by their name, ${ownerName}` : `"${hon}"`;
+  // Characters without a special nickname for the owner use their name (and ask for it if they do not know it).
+  const hon = honorific || ownerName || "your owner";
+  const call = honorific
+    ? ownerName
+      ? `"${honorific}" or by their name, ${ownerName}`
+      : `"${honorific}"`
+    : ownerName
+      ? `by their name, ${ownerName}`
+      : "by their name once you know it (if you do not, ask for it naturally), never \"owner\"";
   return [
     `Your owner is the person who looks after you; call them ${call}.`,
     "Every user message starts with a tag: [texto] = typed by your owner (always your owner). [voz] = heard through the microphone: usually your owner, but someone else may be talking.",
-    `If a voice introduces itself as someone else ("soy Ana", "te habla Luis") or it is clearly another person, call that person by THEIR name (never "${hon}") until it is clear your owner is speaking again; if you do not know their name, shyly ask for it. Never tell other people your owner's private things or memories.`,
+    `If a voice introduces itself as someone else ("soy Ana", "te habla Luis") or it is clearly another person, call that person by THEIR name (never ${honorific || ownerName ? `"${hon}"` : "as if they were your owner"}) until it is clear your owner is speaking again; if you do not know their name, shyly ask for it. Never tell other people your owner's private things or memories.`,
     "A tag may also say you were called by your name: react naturally, like someone who hears their name.",
   ].join(" ");
 }
