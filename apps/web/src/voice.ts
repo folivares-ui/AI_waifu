@@ -25,14 +25,20 @@ const synth = (): SpeechSynthesis | undefined =>
 const GOOD = /natural|online|neural|google|nanami|haruka|ayumi|mayu|aoi|shiori|kyoko|o-ren|elvira|helena|laura|lucia|monica|paulina|sabina|dalia|elena/i;
 const MALE = /ichiro|keita|daichi|naoki|otoya|hattori|alvaro|pablo|raul|jorge|diego|jose|gonzalo|male\b/i;
 
-/** Picks the best installed voice for a language (e.g. a natural female Japanese voice for "ja-JP"). */
-export function pickVoice(voices: SpeechSynthesisVoice[], lang: string): SpeechSynthesisVoice | undefined {
+/**
+ * Picks the best voice for a language (e.g. a female Japanese voice for "ja-JP").
+ * Privacy: "online" voices (Edge's "Natural", Chrome's "Google ...") send every sentence to Microsoft/Google.
+ * They are only used when `allowOnline` is true (a setting the user turns on); by default only voices that run
+ * on this computer (`localService`) are used.
+ */
+export function pickVoice(voices: SpeechSynthesisVoice[], lang: string, allowOnline = false): SpeechSynthesisVoice | undefined {
   const want = lang.toLowerCase();
   const prefix = want.slice(0, 2);
   const score = (v: SpeechSynthesisVoice) =>
     (v.lang.toLowerCase().replace("_", "-") === want ? 2 : 0) + (GOOD.test(v.name) ? 3 : 0) - (MALE.test(v.name) ? 5 : 0);
   return voices
     .filter((v) => v.lang.toLowerCase().replace("_", "-").startsWith(prefix))
+    .filter((v) => allowOnline || v.localService !== false)
     .sort((a, b) => score(b) - score(a))[0];
 }
 
@@ -105,6 +111,9 @@ export class Speaker {
     this.voice = v;
   }
 
+  /** Online voices send the text to Microsoft/Google: off unless the user allows it. */
+  allowOnline = false;
+
   /**
    * Speaks a line with the system voice, in `lang` (default: her text language). Returns false when this
    * browser/Windows has no voice for that language (the caller can tell the user once).
@@ -116,7 +125,9 @@ export class Speaker {
     u.lang = lang;
     u.pitch = this.voice.pitch;
     u.rate = this.voice.rate;
-    const voice = pickVoice(tts.getVoices(), lang);
+    const voice = pickVoice(tts.getVoices(), lang, this.allowOnline);
+    // No allowed voice: stay silent rather than let the browser pick an online one by itself.
+    if (!voice && tts.getVoices().length > 0) return false;
     if (voice) u.voice = voice;
     this.pending++;
     const done = () => {

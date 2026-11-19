@@ -2,6 +2,25 @@
 
 Resumen de cómo se protege el programa y qué conviene que hagas tú. Revisado el 2026-11-18.
 
+## Qué información sale de tu equipo y adónde
+
+El programa no tiene publicidad, estadísticas de uso ni informes de errores automáticos, y el servidor solo escucha en tu PC. Lo único que sale es lo que necesitan los servicios que **tú** eliges:
+
+| Qué usas | Qué sale | A quién |
+|---|---|---|
+| Cerebro **Claude** (`LLM_PROVIDER=anthropic`) | Lo que le escribes o dices (ya transcrito), su personalidad, recuerdos relacionados, lo que lee para ti (documentos, páginas, capturas de pantalla si la compartes) y cada frase para traducirla al japonés | Anthropic (su API). Revisa su política de datos en anthropic.com; puede cambiar |
+| Cerebro **Ollama** | Nada | Se queda en tu PC |
+| Voz y micrófono con **VoiceStudio** | Nada desde esta app (VoiceStudio es otro programa: revisa qué hace él, por ejemplo al descargar modelos) | Se queda en tu PC |
+| Micrófono **sin** VoiceStudio (`STT_PROVIDER=none`) | Tu audio | Google (Chrome) o Microsoft (Edge): es el reconocimiento de voz del navegador |
+| Voces **"en línea"** del navegador | Cada frase que dice | Microsoft o Google. **Desactivadas por defecto** (Ajustes → Voces en línea) |
+| Herramienta **browser** | Las páginas que le pides abrir (como cualquier navegador) | Esas webs |
+| Herramienta **public_apis** | Las consultas a esas APIs | Esas APIs (desactivada si no la pones en `TOOLS`) |
+| Compilar o actualizar (`npm install`, `npm run exe`, `git pull`) | Descargas de paquetes y herramientas | npm, nodejs.org, GitHub, Google (modelo de gestos) |
+
+**Modo privado:** pon `PRIVACY=local` en el `.env`. El servidor no arranca si algo de la lista anterior enviaría datos fuera (y te dice qué cambiar), y la app no usa el reconocimiento ni las voces en línea del navegador. Necesitas `LLM_PROVIDER=ollama` (más lento y menos listo que Claude) y VoiceStudio para la voz y el micrófono.
+
+Fuera de esta app: Windows, Edge/Chrome y WebView2 se comunican con Microsoft/Google por su cuenta (actualizaciones, protección contra webs peligrosas); eso no depende de este programa.
+
 ## Qué protege el programa
 
 **Conexiones**

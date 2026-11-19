@@ -1,5 +1,6 @@
 import "./env.js"; // must stay first: loads .env before other modules read process.env
 import { isLoopbackHost, makeAuthorizer } from "./auth.js";
+import { privacyProblems, privateMode } from "./privacy.js";
 import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
@@ -25,6 +26,12 @@ import { appPath, userPath } from "./paths.js";
 const port = Number(process.env.PORT ?? 8787);
 // Loopback only by default. To use from phone/another PC set HOST=0.0.0.0 AND AUTH_TOKEN.
 const host = process.env.HOST ?? "127.0.0.1";
+// PRIVACY=local: refuse to start with anything that would send your data outside this computer.
+const privacy = privacyProblems();
+if (privacy.length) {
+  console.error(`\n[!] PRIVACY=local, pero la configuracion enviaria datos fuera de este equipo:\n${privacy.map((p) => `    - ${p}`).join("\n")}\n    Corrige el .env (o quita PRIVACY=local) y vuelve a arrancar.\n`);
+  process.exit(1);
+}
 const token = process.env.AUTH_TOKEN;
 if (host !== "127.0.0.1" && host !== "localhost" && !token) {
   throw new Error("Refusing to listen on a non-loopback address without AUTH_TOKEN set.");
@@ -118,7 +125,7 @@ if (tts instanceof VoiceStudioTTS) {
     .catch((e) => console.warn(`[voice] ${e instanceof Error ? e.message : e}`));
 }
 const makeTools = createToolFactory();
-const caps: Capabilities = { tts: !!tts, stt: !!stt, vision: !!llm.vision };
+const caps: Capabilities = { tts: !!tts, stt: !!stt, vision: !!llm.vision, ...(privateMode() ? { privateMode: true } : {}) };
 const actionLog = new ActionLog(process.env.ACTIONS_LOG ?? userPath("data/actions.jsonl"));
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 

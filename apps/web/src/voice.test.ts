@@ -6,9 +6,17 @@ const v = (name: string, lang: string) => ({ name, lang }) as SpeechSynthesisVoi
 describe("pickVoice", () => {
   it("prefers a natural female voice of the right language, never a male one if avoidable", () => {
     const list = [v("Microsoft Ichiro - Japanese", "ja-JP"), v("Microsoft Sabina - Spanish (Mexico)", "es-MX"), v("Microsoft Nanami Online (Natural) - Japanese (Japan)", "ja-JP"), v("Microsoft Haruka - Japanese", "ja-JP")];
-    expect(pickVoice(list, "ja-JP")?.name).toMatch(/Nanami/);
+    expect(pickVoice(list, "ja-JP", true)?.name).toMatch(/Nanami/);
     expect(pickVoice(list.filter((x) => !/Nanami/.test(x.name)), "ja-JP")?.name).toMatch(/Haruka/);
-    expect(pickVoice([v("Google 日本語", "ja-JP")], "ja-JP")?.name).toBe("Google 日本語");
+    expect(pickVoice([v("Google 日本語", "ja-JP")], "ja-JP", true)?.name).toBe("Google 日本語");
     expect(pickVoice(list, "ko-KR")).toBeUndefined();
+  });
+  it("by default never uses online voices (they send the text to Microsoft/Google)", () => {
+    const online = (name: string, lang: string) => ({ name, lang, localService: false }) as SpeechSynthesisVoice;
+    const local = (name: string, lang: string) => ({ name, lang, localService: true }) as SpeechSynthesisVoice;
+    const list = [online("Microsoft Nanami Online (Natural) - Japanese (Japan)", "ja-JP"), local("Microsoft Haruka - Japanese", "ja-JP"), online("Google 日本語", "ja-JP")];
+    expect(pickVoice(list, "ja-JP")?.name).toMatch(/Haruka/);
+    expect(pickVoice(list.filter((x) => x.localService === false), "ja-JP")).toBeUndefined();
+    expect(pickVoice(list, "ja-JP", true)?.name).toMatch(/Nanami/);
   });
 });

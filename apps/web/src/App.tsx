@@ -100,7 +100,7 @@ export function App() {
         voiceWarned.current = true;
         setVoiceHint(
           speech.lang.startsWith("ja")
-            ? "No hay una voz japonesa instalada. En Windows: Configuracion > Hora e idioma > Voz > Agregar voces > Japones. En Edge o Chrome suelen venir incluidas."
+            ? "No hay una voz japonesa instalada en este equipo. En Windows: Configuracion > Hora e idioma > Voz > Agregar voces > Japones. (Las voces 'en linea' del navegador estan desactivadas por privacidad.)"
             : `No hay una voz instalada para ${speech.lang}.`,
         );
       }
@@ -120,6 +120,19 @@ export function App() {
     },
   });
   const { caps, voice } = soul;
+  // Privacy: the browser's own speech recognition sends your audio to Google/Microsoft, and its "online" voices
+  // send her sentences there. Online voices are off unless you allow them; in PRIVACY=local mode both are off.
+  const browserSttAllowed = sttSupported && !caps.privateMode;
+  const [onlineVoices, setOnlineVoices] = useState(() => {
+    try {
+      return localStorage.getItem("waifu_online_voices") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    if (speaker.current) speaker.current.allowOnline = onlineVoices && !caps.privateMode;
+  });
 
   /** Sends a message; if it calls her by name she reacts at once (ears up), before the answer arrives. */
   const say = (t: string, opts: { image?: ScreenImage; source?: "text" | "voice" } = {}) => {
@@ -244,7 +257,8 @@ export function App() {
       setStatus("");
       return;
     }
-    if (!caps.stt && !sttSupported) return setMicError("Este navegador no tiene reconocimiento de voz: configura STT_PROVIDER en el servidor.");
+    if (!caps.stt && !browserSttAllowed)
+      return setMicError(caps.privateMode ? "Modo privado: el reconocimiento de voz del navegador envia el audio fuera; configura STT_PROVIDER=voicestudio." : "Este navegador no tiene reconocimiento de voz: configura STT_PROVIDER en el servidor.");
     setMicError(undefined);
     void getPlayer().unlock();
     try {
@@ -351,7 +365,7 @@ export function App() {
   // Never leave the camera on when the app goes away.
   useEffect(() => () => camera.current?.stop(), []);
 
-  const canListen = caps.stt || sttSupported;
+  const canListen = caps.stt || browserSttAllowed;
   const short = soul.names?.aliases.at(-1) ?? soul.name;
   const mood = !soul.connected
     ? "Sin conexion"
@@ -562,11 +576,32 @@ export function App() {
                 }}
               />
             </label>
+            {!caps.privateMode && (
+              <label className="row">
+                <span>
+                  Voces en linea del navegador
+                  <small>Suenan mas naturales, pero cada frase se envia a Microsoft o Google. Solo se usan si VoiceStudio no esta disponible. Desactivado = solo voces instaladas en tu equipo.</small>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={onlineVoices}
+                  onChange={(e) => {
+                    setOnlineVoices(e.target.checked);
+                    try {
+                      localStorage.setItem("waifu_online_voices", e.target.checked ? "1" : "0");
+                    } catch {
+                      /* private window: only for this session */
+                    }
+                  }}
+                />
+              </label>
+            )}
             <div className="row info">
               <span>
                 Voz
                 <small>
-                  Oido: {caps.stt ? "servidor" : sttSupported ? "navegador" : "no disponible (escribe)"} · Habla: {caps.tts ? "servidor" : "navegador"}
+                  Oido: {caps.stt ? "en tu equipo" : browserSttAllowed ? "navegador (tu audio se envia a Google/Microsoft)" : "no disponible (escribe)"} · Habla: {caps.tts ? "en tu equipo" : "voz del navegador"}
+                  {caps.privateMode && " · Modo privado: nada sale de este equipo"}
                 </small>
               </span>
             </div>

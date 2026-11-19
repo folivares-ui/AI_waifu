@@ -70,6 +70,11 @@ export interface Capabilities {
   stt: boolean;
   /** The brain can see images (screen sharing features are offered). */
   vision: boolean;
+  /**
+   * PRIVACY=local: nothing may leave this computer, so the app must not use the browser's own speech
+   * recognition (audio goes to Google/Microsoft) or online browser voices (text goes to them).
+   */
+  privateMode?: boolean;
 }
 
 export interface VoiceHints {
