@@ -16,7 +16,8 @@ export function AvatarStage({ character = "", ...props }: AvatarProps & { charac
   useEffect(() => {
     let cancelled = false;
     // The model of the active character (the query only keeps browsers from reusing another character's model).
-    fetch(`/avatars/default.vrm?c=${encodeURIComponent(character)}`, { headers: serverBase().token ? { authorization: `Bearer ${serverBase().token}` } : {} })
+    // Always from the soul server (in development the page itself comes from another server with its own files).
+    fetch(`${serverBase().http}/avatars/default.vrm?c=${encodeURIComponent(character)}`, { headers: serverBase().token ? { authorization: `Bearer ${serverBase().token}` } : {} })
       .then((r) => (r.ok ? r.arrayBuffer() : null))
       .then((b) => !cancelled && b && isGlb(b) && setModel(b)) // dev servers may answer 200 with index.html
       .catch(() => {});

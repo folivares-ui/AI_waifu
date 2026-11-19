@@ -17,7 +17,7 @@ import type { Emotion } from "@waifu/core";
 
 type Move = { bones: RegExp; mm: [number, number, number] } | { bones: RegExp; rot: [number, number, number] };
 
-const UPPER_LID = /^(Eye_up_0[1345]|Eye_up_1[1345]|Eye_double_0\d|Eye_sub_0[123]|Eyelashes|Eye_middle_01)_[LR]$/;
+const UPPER_LID = /^(Eye_up_0[12345]|Eye_up_1[12345]|Eye_double_0\d|Eye_sub_0[1234]|Eyelashes|Eye_middle_01)_[LR]$/;
 const LOWER_LID = /^Eye_bottom_0\d_[LR]$/;
 const LOWER_LID_MID = /^Eye_bottom_0[23]_[LR]$/; // centre of the lower lid
 const LOWER_LID_ENDS = /^Eye_bottom_0[14]_[LR]$/; // inner and outer corners
