@@ -15,6 +15,7 @@ import {
 import { ActionLog } from "./actionLog.js";
 import type { ChatMessage, ContentBlock, LLMEvent, LLMProvider } from "./llm/index.js";
 import { extractFacts, type MemoryStore } from "./memory.js";
+import { evaluateGrowth, type Growth } from "./growth.js";
 import { buildSystemPrompt, type Soul } from "./soul.js";
 import { needsSpeechTranslation, speechLangOf, translateForSpeech, validLang } from "./speech.js";
 import type { ApprovalInfo } from "./tools/types.js";
@@ -29,6 +30,8 @@ const MAX_IMAGE_BASE64 = 2_500_000; // ~1.8 MB of JPEG
 const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export interface SessionOptions {
+  /** Her personality growth (levels that change with how she is treated). */
+  growth?: Growth;
   tts?: TTSProvider;
   caps?: Capabilities;
   /** Tools, or a factory that receives this session's context (needed for screen access). */
@@ -85,6 +88,7 @@ export class Session {
   private lastTtsError?: { message: string; at: number };
   /** Spoken language chosen in the app's settings (undefined = the soul's default). */
   private chosenSpeechLang?: string;
+  private growth?: Growth;
   private lastWatch = 0;
   private lastReaction = -Infinity;
   private reactionMin: number;
@@ -114,12 +118,14 @@ export class Session {
     this.screenTimeout = opts.screenTimeoutMs ?? 8000;
     this.approvalTimeout = opts.approvalTimeoutMs ?? 120_000;
     this.actionLog = opts.actionLog ?? new ActionLog();
+    this.growth = opts.growth;
     const ctx: ToolContext = { requestScreen: (signal) => this.requestScreen(signal) };
     this.tools = typeof opts.tools === "function" ? opts.tools(ctx) : (opts.tools ?? []);
   }
 
   /** Becomes another character (from the app's settings): the current answer stops and the conversation restarts. */
-  setCharacter(soul: Soul, memory: MemoryStore) {
+  setCharacter(soul: Soul, memory: MemoryStore, growth?: Growth) {
+    this.growth = growth;
     this.abort?.abort();
     for (const [, answer] of this.approvalWaiters) answer(false);
     this.history = [];
@@ -269,7 +275,7 @@ export class Session {
       // She may speak another language than the one shown (e.g. Japanese aloud, Spanish subtitles).
       const lang = speechLangOf(this.soul, this.chosenSpeechLang);
       const speech: Promise<{ say: string; lang: string }> = needsSpeechTranslation(this.soul, lang)
-        ? translateForSpeech(this.llm, this.soul, spoken, lang, abort.signal).then(
+        ? translateForSpeech(this.llm, this.soul, spoken, lang, abort.signal, this.growth?.styleNote()).then(
             (say) => ({ say, lang }),
             (err) => {
               // Never fall back to speaking Spanish when she is meant to speak Japanese: the line is only shown.
@@ -337,7 +343,7 @@ export class Session {
 
     try {
       const useTools = !opts.proactive && this.tools.length > 0;
-      const system = buildSystemPrompt(this.soul, this.memory.recall(userText), useTools, !!this.caps.vision);
+      const system = buildSystemPrompt(this.soul, this.memory.recall(userText), useTools, !!this.caps.vision, this.growth?.prompt());
       const working: ChatMessage[] = [...this.history.slice(-MAX_HISTORY - 1, -1), modelUserMsg];
       const toolDefs = useTools ? this.tools.map((t) => t.def) : [];
       let rounds = 0;
@@ -469,9 +475,21 @@ export class Session {
     else this.history.pop(); // nothing was said (or she stayed silent); drop the dangling user message
     this.send({ type: "done", turnId, interrupted });
 
-    // Privacy: what she saw on the screen is not distilled into long-term memory.
-    if (!interrupted && reply && !usedVision && !opts.proactive) {
-      for (const fact of await extractFacts(this.llm, userText, reply)) this.memory.add(fact);
+    if (!interrupted && reply && !opts.proactive) {
+      const growth = this.growth;
+      const soul = this.soul;
+      const [facts, changes] = await Promise.all([
+        // Privacy: what she saw on the screen is not distilled into long-term memory.
+        usedVision ? Promise.resolve([]) : extractFacts(this.llm, userText, reply),
+        // Her personality grows (slowly) with how she is treated.
+        growth ? evaluateGrowth(this.llm, soul.name, growth.traits, userText, reply) : Promise.resolve([]),
+      ]);
+      for (const fact of facts) this.memory.add(fact);
+      if (growth && growth === this.growth) {
+        for (const m of growth.apply(changes)) {
+          this.send({ type: "notice", message: `${soul.name} ${(m.up ? m.trait.up : m.trait.down) ?? `ha cambiado (${m.trait.name}: ${m.level}/100)`}.` });
+        }
+      }
     }
   }
 }

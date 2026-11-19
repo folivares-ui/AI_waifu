@@ -75,3 +75,11 @@ export const listCharacters = () => api<CharacterInfo[]>("/characters");
 export const selectCharacter = (id: string) => api<{ id: string; name: string }>("/characters/active", { method: "POST", body: JSON.stringify({ id }) });
 export const createCharacter = (c: NewCharacter) => api<{ id: string }>("/characters", { method: "POST", body: JSON.stringify(c) });
 export const deleteCharacter = (id: string) => api<{ removed: string }>(`/characters/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+export interface GrowthView {
+  name: string;
+  traits: { id: string; name: string; level: number; start: number }[];
+  recent: { at: string; trait: string; delta: number; reason: string }[];
+}
+export const getGrowth = () => api<GrowthView>("/growth");
+export const resetGrowth = () => api<GrowthView>("/growth/reset", { method: "POST" });

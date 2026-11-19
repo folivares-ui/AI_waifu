@@ -20,7 +20,7 @@ export const validLang = (l: unknown): l is string => typeof l === "string" && /
  * Translates one of her lines into the spoken language, in character (e.g. Japanese with Rice's way of talking).
  * The text shown on screen stays in the original language, like subtitles.
  */
-export async function translateForSpeech(llm: LLMProvider, soul: Soul, text: string, lang: string, signal?: AbortSignal): Promise<string> {
+export async function translateForSpeech(llm: LLMProvider, soul: Soul, text: string, lang: string, signal?: AbortSignal, growthNote?: string): Promise<string> {
   const code = lang.slice(0, 2).toLowerCase();
   const name = LANG_NAMES[code] ?? lang;
   const ask = async (strict: boolean) => {
@@ -28,6 +28,7 @@ export async function translateForSpeech(llm: LLMProvider, soul: Soul, text: str
       "TRANSLATE_FOR_SPEECH",
       `Translate the line spoken by ${soul.name} into natural, spoken ${name}, as she would say it aloud.`,
       soul.voice.speechStyle ? `Her way of speaking: ${soul.voice.speechStyle}` : "",
+      growthNote ? `She has grown since then, so adapt that style to her current personality (e.g. fewer hesitations if she is more confident): ${growthNote}` : "",
       "Keep the meaning, tone and names. Output ONLY the translation: no quotes, no romanization, no notes, no explanations.",
       strict ? `Your previous answer was not in ${name}. Every word must be in ${name}${code === "ja" ? " (kana/kanji; Spanish or romaji words such as \"arigatou\" or \"Onii-sama\" must be written in Japanese: ありがとう, お兄さま)" : ""}.` : "",
     ]

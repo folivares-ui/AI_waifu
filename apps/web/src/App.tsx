@@ -11,6 +11,7 @@ import { ScreenShare } from "./screen";
 import { storedSpeechLang, useSoul } from "./useSoul";
 import { DialogBox } from "./DialogBox";
 import { CharacterPicker } from "./Characters";
+import { GrowthPanel } from "./GrowthPanel";
 import { addLine, markStarted, revealStale, type Dialog } from "./dialog";
 import { Listener, Speaker, sttSupported } from "./voice";
 
@@ -526,6 +527,7 @@ export function App() {
               </button>
             </header>
             <CharacterPicker current={soul.name} />
+            <GrowthPanel character={soul.name} />
             <label className="row">
               <span>
                 Uso auriculares

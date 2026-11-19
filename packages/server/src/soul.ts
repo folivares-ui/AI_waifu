@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { Trait } from "./growth.js";
 import { EMOTIONS, type NameConfig, type VoiceHints } from "@waifu/core";
 
 export interface Soul {
@@ -11,6 +12,8 @@ export interface Soul {
   names?: NameConfig;
   /** Her owner: the person who types to her and whose voice she normally hears. */
   owner?: { name?: string; honorific?: string };
+  /** Traits that grow with how she is treated (see growth.ts); defaults are used when absent. */
+  growth?: Trait[];
 }
 
 export function loadSoul(path: string): Soul {
@@ -24,6 +27,7 @@ export function loadSoul(path: string): Soul {
     boundaries: s.boundaries ?? "",
     names: s.names?.aliases?.length ? s.names : { aliases: [s.name] },
     owner: s.owner,
+    growth: Array.isArray(s.growth) ? s.growth.filter((t) => t && typeof t.id === "string" && typeof t.name === "string").slice(0, 6) : undefined,
   };
 }
 
@@ -45,12 +49,13 @@ function speakerRules(soul: Soul): string {
   ].join(" ");
 }
 
-export function buildSystemPrompt(soul: Soul, memories: string[], hasTools = false, vision = false): string {
+export function buildSystemPrompt(soul: Soul, memories: string[], hasTools = false, vision = false, growth = ""): string {
   const mem = memories.length
     ? `\nThings you remember about the user and past conversations:\n${memories.map((m) => `- ${m}`).join("\n")}\n`
     : "";
   return [
     soul.persona,
+    growth,
     soul.boundaries,
     `Your name is ${soul.name}. Reply in the user's language (default: ${soul.language}).`,
     speakerRules(soul),

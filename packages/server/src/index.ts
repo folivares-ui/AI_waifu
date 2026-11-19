@@ -15,6 +15,7 @@ import { MemoryStore } from "./memory.js";
 import { Session } from "./session.js";
 import { sttHint } from "./soul.js";
 import { Characters, DEFAULT_ID, type NewCharacter } from "./characters.js";
+import { DEFAULT_TRAITS, Growth } from "./growth.js";
 import { createStaticHandler } from "./static.js";
 import { browserForShutdown, createToolFactory, onAllClientsGone } from "./tools/index.js";
 import { createSTT } from "./stt/index.js";
@@ -58,12 +59,15 @@ function switchCharacter(id: string) {
   characters.setActive(id);
   if (id === active.id) return;
   active = loadCharacter(id);
-  for (const s of sessions) s.setCharacter(active.soul, active.memory);
+  for (const s of sessions) s.setCharacter(active.soul, active.memory, active.growth);
   console.log(`[characters] now: ${active.soul.name}`);
   // Her VoiceStudio voice is created from her saved sample if needed.
   if (tts instanceof VoiceStudioTTS) void ensureVoice(id).then((m) => console.log(`[voice] ${m}`), (e) => console.warn(`[voice] ${e instanceof Error ? e.message : e}`));
 }
-const loadCharacter = (id: string) => ({ id, soul: characters.load(id), memory: new MemoryStore(characters.paths(id).memory) });
+const loadCharacter = (id: string) => {
+  const soul = characters.load(id);
+  return { id, soul, memory: new MemoryStore(characters.paths(id).memory), growth: new Growth(characters.paths(id).growth, soul.growth ?? DEFAULT_TRAITS) };
+};
 let active = loadCharacter(characters.activeId());
 /** Every open window's conversation, so a character change reaches all of them. */
 const sessions = new Set<Session>();
@@ -169,7 +173,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
   cors(req, res);
   const path = new URL(req.url ?? "", "http://x").pathname;
   if (req.method === "OPTIONS") return void res.writeHead(204).end();
-  const isApi = path === "/health" || path === "/stt" || path === "/avatar" || path === "/voice" || path === "/characters" || path.startsWith("/characters/");
+  const isApi = path === "/health" || path === "/stt" || path === "/avatar" || path === "/voice" || path === "/characters" || path.startsWith("/characters/") || path.startsWith("/growth");
   if (isApi && !authorized(req)) return json(res, 403, { error: "forbidden" });
 
   if (path === "/health") return json(res, 200, { ok: true, soul: active.soul.name, character: active.id, llm: llm.name, tts: tts?.name ?? null, stt: stt?.name ?? null, memories: active.memory.size });
@@ -197,6 +201,13 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       return void createReadStream(file).pipe(res);
     }
     if (active.id !== DEFAULT_ID) return json(res, 404, { error: "no model for this character yet" });
+  }
+  // How the active character's personality has grown (and starting over, only when you ask).
+  if (path === "/growth" && req.method === "GET") return json(res, 200, { name: active.soul.name, ...active.growth.snapshot() });
+  if (path === "/growth/reset" && req.method === "POST") {
+    active.growth.reset();
+    console.log(`[growth] ${active.soul.name}: back to how she started`);
+    return json(res, 200, { name: active.soul.name, ...active.growth.snapshot() });
   }
   // Characters: list, create, switch, delete.
   if (path === "/characters" && req.method === "GET") return json(res, 200, characters.list());
@@ -270,7 +281,7 @@ wss.on("connection", (ws) => {
   clients++;
   sockets.add(ws);
   clearTimeout(goneTimer);
-  const session = new Session(active.soul, llm, active.memory, (m) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m)), { tts, caps, tools: makeTools, watchMinIntervalMs: Number(process.env.WATCH_MIN_INTERVAL_MS ?? 25000), actionLog, approvalTimeoutMs: Number(process.env.APPROVAL_TIMEOUT_MS ?? 120000) });
+  const session = new Session(active.soul, llm, active.memory, (m) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m)), { growth: active.growth, tts, caps, tools: makeTools, watchMinIntervalMs: Number(process.env.WATCH_MIN_INTERVAL_MS ?? 25000), actionLog, approvalTimeoutMs: Number(process.env.APPROVAL_TIMEOUT_MS ?? 120000) });
   sessions.add(session);
   session.hello();
   ws.on("message", (data) => {
