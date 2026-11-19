@@ -5,6 +5,8 @@ import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 import type { Emotion, TouchRegion } from "@waifu/core";
 import { addSpringChains, faceFraming, fullFraming, hideHelperMeshes, toonify } from "./avatarFixups";
 import { collectParts } from "./modelParts";
+import { BODY_BONES, bodyPose } from "./bodyMotion";
+import { solveArmPoses, type ArmSolutions } from "./armIK";
 import { BoneFaceRig, CHANNEL_NAMES, RIG_POSES, type Channel } from "./boneFace";
 import { REACTIONS, StrokeTracker, TouchMap, envelope } from "./petting";
 
@@ -81,6 +83,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
     let blinkT = -1;
     // Models without expressions but with facial bones are animated through this rig instead.
     let rig: BoneFaceRig | undefined;
+    let armPoses: ArmSolutions = {};
     let springs: ReturnType<typeof addSpringChains>;
     const rigCur = Object.fromEntries(CHANNEL_NAMES.map((n) => [n, 0])) as Record<Channel, number>;
     let nextTwitch = 3;
@@ -144,6 +147,8 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         live.current.onParts?.([...parts.current.keys()]);
         const tooned = toonify(v);
         rig = BoneFaceRig.detect(v); // must run in the rest pose
+        armPoses = solveArmPoses(v); // hands on the hips, at the chin... for this model's proportions
+        if (import.meta.env.DEV) console.info(`[avatar] arm poses solved: ${Object.keys(armPoses).join(", ") || "none"}`);
         touchMap = new TouchMap(v);
         springs = addSpringChains(v);
         if (hidden.length || tooned || rig || springs) {
@@ -183,6 +188,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
       if (!vrm) return renderer.render(scene, camera);
       const p = live.current;
       const pose = POSES[p.emotion];
+      let voiceLevel = 0;
 
       // Targets
       const target: Record<string, number> = Object.fromEntries(EXPR_NAMES.map((n) => [n, 0]));
@@ -190,6 +196,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
       if (p.speaking) {
         const raw = p.getLevel?.() ?? -1; // negative = no audio signal (browser voice): simulate flapping
         const lvl = raw >= 0 ? raw : 0.35 + 0.35 * Math.sin(t * 13) * Math.sin(t * 5.3);
+        voiceLevel = lvl;
         const open = Math.min(0.8, lvl * 2.2); // leave room for the emotion to stay visible
         const shape = (Math.sin(t * 6.1) + 1) / 2; // vary vowels a little
         target.aa = open * (0.55 + 0.45 * shape);
@@ -291,23 +298,39 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         head.rotation.z = lerp(head.rotation.z, pose.tilt + (p.listening ? 0.03 : 0) - (re?.tiltToward ?? 0) * side * mirror * k, dt * 3);
       }
       const spine = vrm.humanoid.getNormalizedBoneNode("spine");
-      // Waving back: right arm up, forearm swinging, for ~2.4 s.
-      const wk = envelope(t, waveStart, waveStart + 1.6, 0.35, 0, 0.5);
+      // Body language: arms and legs follow her mood, her breathing and her voice (see bodyMotion.ts).
+      // VRM 0.x normalized bones are mirrored (x and z flip); poses are written in VRM 1.0 convention.
       const armK = vrm.meta.metaVersion === "0" ? -1 : 1;
+      const devBody = import.meta.env.DEV ? (window as unknown as { __bodyEmotion?: Emotion; __bodySpeaking?: boolean }) : undefined;
+      const body = bodyPose({ t, emotion: devBody?.__bodyEmotion ?? p.emotion, speaking: devBody?.__bodySpeaking ?? p.speaking, level: voiceLevel, listening: p.listening, arms: armPoses });
+      const follow = Math.min(1, dt * 4.5); // ~0.3 s to settle into a new pose
+      for (const name of BODY_BONES) {
+        const e = body[name];
+        const b = vrm.humanoid.getNormalizedBoneNode(name as never);
+        if (!e || !b || name === "spine" || name === "chest") continue;
+        b.rotation.x = lerp(b.rotation.x, e[0] * armK, follow);
+        b.rotation.y = lerp(b.rotation.y, e[1], follow);
+        b.rotation.z = lerp(b.rotation.z, e[2] * armK, follow);
+      }
+      // Waving back: right arm up, forearm swinging, for ~2.4 s (blended over her current pose).
+      const wk = envelope(t, waveStart, waveStart + 1.6, 0.35, 0, 0.5);
       const rUp = vrm.humanoid.getNormalizedBoneNode("rightUpperArm");
       const rLow = vrm.humanoid.getNormalizedBoneNode("rightLowerArm");
-      if (rUp && rLow) {
-        rUp.rotation.z = lerp(1.2 * armK, -0.25 * armK, wk);
-        rUp.rotation.x = 0;
-        rLow.rotation.z = lerp(0.1 * armK, -(0.9 + 0.35 * Math.sin(t * 9)) * armK, wk);
+      if (rUp && rLow && wk > 0) {
+        rUp.rotation.z = lerp(rUp.rotation.z, -0.25 * armK, wk);
+        rUp.rotation.x = lerp(rUp.rotation.x, 0, wk);
+        rLow.rotation.y = lerp(rLow.rotation.y, 0, wk);
+        rLow.rotation.z = lerp(rLow.rotation.z, -(0.9 + 0.35 * Math.sin(t * 9)) * armK, wk);
       }
       const shrinkK = re?.shrink && reaction ? env : 0;
       if (spine) {
-        spine.rotation.x = lerp(spine.rotation.x, Math.sin(t * 1.5) * 0.012 - 0.16 * shrinkK, dt * 6); // steps back
+        // steps back when shy; leans in a little while listening
+        spine.rotation.x = lerp(spine.rotation.x, Math.sin(t * 1.5) * 0.012 - 0.16 * shrinkK + (body.spine?.[0] ?? 0) * armK, dt * 6);
         spine.rotation.y = lerp(spine.rotation.y, 0.32 * (reaction?.side ?? 1) * shrinkK, dt * 5); // turns away
+        spine.rotation.z = lerp(spine.rotation.z, (body.spine?.[2] ?? 0) * armK, follow); // stays upright over the shifting hips
       }
       const chest = vrm.humanoid.getNormalizedBoneNode("chest");
-      if (chest) chest.rotation.x = Math.sin(t * 1.5 + 0.4) * 0.01;
+      if (chest) chest.rotation.x = lerp(chest.rotation.x, Math.sin(t * 1.5 + 0.4) * 0.01 + (body.chest?.[0] ?? 0) * armK, follow);
 
       vrm.update(dt);
       springs?.update(dt);

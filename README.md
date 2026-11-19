@@ -199,6 +199,9 @@ Rice speaks **Japanese** (like in the anime) while her words are shown in **Span
 - She never falls back to speaking Spanish: a translation that is not Japanese is retried once, and if it still fails that line is only shown.
 - Speech recognition stays Spanish. Use headphones if the microphone picks up her Japanese voice.
 
+## Body language
+Arms and legs are no longer fixed: she breathes and sways a little, shifts her weight from one leg to the other every few seconds, and gestures with her hands on the beat of her voice while she talks. Each mood has its own pose: open arms when happy, close to the body when sad, hands on the hips when angry, hands to the chest when surprised, a hand at the chin when thinking, hands together when shy. The poses that need the hands in a precise place are solved for each model when it loads (its own proportions), so they fit tall and short characters alike, VRM 0.x and 1.0.
+
 ## Petting and gestures
 - **Petting:** move the cursor (or a finger) over her. Head pats, ears, cheeks, hair, hands... each gets its own expressive reaction (and a short spoken line now and then); private areas make her flustered and she politely asks you to stop. Hovering without moving does nothing.
 - **Camera gestures (opt-in):** press the camera button. While it is on, a preview with a red "Camara" badge is visible; the images are analysed on your device and never sent anywhere (only the gesture name). 👋 wave (she waves back), 👍, 👎, ✌️, 🤟, ☝️, ✊, and ✋ held still = "stop talking". A held gesture counts once. Setup: `npm run setup:gestures` (also runs automatically before `dev`/`build` of the web app).
