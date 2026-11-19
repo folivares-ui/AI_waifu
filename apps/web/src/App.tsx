@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { encodeWav, looksLikeEcho, matchName, resample, type Emotion, type Gesture, type ScreenImage } from "@waifu/core";
 import { ApprovalCard } from "./ApprovalCard";
 import { AvatarStage } from "./AvatarStage";
 import { GESTURE_EMOJI, GestureCamera } from "./gestures";
 import { CameraIcon, CloseIcon, EyeIcon, GearIcon, MicIcon, RoseIcon, ScreenIcon, SendIcon, StopIcon, VideoIcon, HistoryIcon } from "./icons";
 import { startMic, type MicHandle } from "./mic";
-import { savePersonal, transcribe } from "./net";
+import { getHiddenParts, savePersonal, saveHiddenParts, transcribe } from "./net";
 import { ClipPlayer } from "./player";
 import { ScreenShare } from "./screen";
 import { storedSpeechLang, useSoul } from "./useSoul";
 import { DialogBox } from "./DialogBox";
 import { CharacterPicker } from "./Characters";
 import { GrowthPanel } from "./GrowthPanel";
+import { PartsPanel } from "./PartsPanel";
+import { hiddenOrDefault } from "./modelParts";
 import { addLine, markStarted, revealStale, type Dialog } from "./dialog";
 import { Listener, Speaker, sttSupported } from "./voice";
 
@@ -142,6 +144,17 @@ export function App() {
   };
 
   // Errors are shown as a toast that goes away by itself.
+  // Parts of her 3D model (hair, clothes, weapons...) and the ones hidden for this character.
+  const [modelParts, setModelParts] = useState<string[]>([]);
+  const [savedHidden, setSavedHidden] = useState<string[] | null>(null);
+  useEffect(() => {
+    setModelParts([]);
+    setSavedHidden(null);
+    getHiddenParts()
+      .then((r) => setSavedHidden(r.hidden))
+      .catch(() => {});
+  }, [soul.name]);
+  const hiddenParts = useMemo(() => hiddenOrDefault(savedHidden, modelParts), [savedHidden, modelParts]);
   // Another character: her dialog box starts empty.
   useEffect(() => {
     updateDialog(() => ({ turn: -1, lines: [] }));
@@ -374,7 +387,7 @@ export function App() {
 
   return (
     <div className="app">
-      <AvatarStage key={soul.name} character={soul.name} emotion={emotion} speaking={speaking} listening={listening} getLevel={getLevel} onTouch={(r) => soul.sendTouch(r)} />
+      <AvatarStage key={soul.name} character={soul.name} hiddenParts={hiddenParts} onParts={setModelParts} emotion={emotion} speaking={speaking} listening={listening} getLevel={getLevel} onTouch={(r) => soul.sendTouch(r)} />
       <div className="veil veil-top" aria-hidden="true" />
       <div className="veil veil-bottom" aria-hidden="true" />
 
@@ -528,6 +541,15 @@ export function App() {
             </header>
             <CharacterPicker current={soul.name} />
             <GrowthPanel character={soul.name} />
+            <PartsPanel
+              name={soul.name}
+              parts={modelParts}
+              hidden={hiddenParts}
+              onChange={(h) => {
+                setSavedHidden(h);
+                void saveHiddenParts(h).catch(() => {});
+              }}
+            />
             <label className="row">
               <span>
                 Uso auriculares

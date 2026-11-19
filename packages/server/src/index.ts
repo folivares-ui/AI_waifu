@@ -21,6 +21,7 @@ import { browserForShutdown, createToolFactory, onAllClientsGone } from "./tools
 import { createSTT } from "./stt/index.js";
 import { createTTS, VoiceStudioTTS } from "./tts/index.js";
 import { closeLaunched, ensureVoiceStudio, findVoiceStudio } from "./tts/launcher.js";
+import { fixVrm } from "./vrmfix.js";
 import { isGlb, isWav, MAX_AVATAR_BYTES, MAX_VOICE_BYTES, removeIfExists, saveAtomic } from "./personal.js";
 
 import { appPath, userPath } from "./paths.js";
@@ -53,6 +54,19 @@ const characters = new Characters(
   basename(process.env.SOUL_FILE ?? "default.soul.json").replace(/\.soul\.json$/, ""),
   process.env.MEMORY_FILE ? resolve(process.env.MEMORY_FILE) : undefined,
 );
+/** Models saved before the repair existed are fixed (once) the first time they are served. */
+function repairSavedModel(file: string) {
+  try {
+    const r = fixVrm(readFileSync(file));
+    if (r) {
+      saveAtomic(file, r.fixed);
+      console.log(`[avatar] repaired the saved model (${r.bones} humanoid bones added)`);
+    }
+  } catch (e) {
+    console.warn(`[avatar] the saved model could not be repaired: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
 /** Changes who she is in every open window (each character keeps her own memory, model and voice). */
 function switchCharacter(id: string) {
   if (!characters.exists(id)) throw new Error(`No existe el personaje "${id}".`);
@@ -173,7 +187,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
   cors(req, res);
   const path = new URL(req.url ?? "", "http://x").pathname;
   if (req.method === "OPTIONS") return void res.writeHead(204).end();
-  const isApi = path === "/health" || path === "/stt" || path === "/avatar" || path === "/voice" || path === "/characters" || path.startsWith("/characters/") || path.startsWith("/growth");
+  const isApi = path === "/health" || path === "/stt" || path === "/avatar" || path === "/avatar/parts" || path === "/voice" || path === "/characters" || path.startsWith("/characters/") || path.startsWith("/growth");
   if (isApi && !authorized(req)) return json(res, 403, { error: "forbidden" });
 
   if (path === "/health") return json(res, 200, { ok: true, soul: active.soul.name, character: active.id, llm: llm.name, tts: tts?.name ?? null, stt: stt?.name ?? null, memories: active.memory.size });
@@ -196,6 +210,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
     const file = characters.paths(active.id).avatar;
     if (existsSync(file)) {
       if (!authorized(req)) return json(res, 403, { error: "forbidden" });
+      repairSavedModel(file);
       res.writeHead(200, { "content-type": "model/gltf-binary", "cache-control": "no-store" });
       if (req.method === "HEAD") return void res.end();
       return void createReadStream(file).pipe(res);
@@ -243,12 +258,42 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
     try {
       const body = await readBody(req, MAX_AVATAR_BYTES);
       if (!isGlb(body)) return json(res, 400, { error: "Ese archivo no es un modelo VRM/GLB valido." });
-      saveAtomic(characters.paths(active.id).avatar, body);
+      // Converted models often lack the humanoid bone list that every VRM viewer needs: fill it in.
+      let model = body;
+      try {
+        const r = fixVrm(body);
+        if (r) {
+          model = r.fixed;
+          console.log(`[avatar] the model had no humanoid bone list: ${r.bones} bones recognised and added`);
+        }
+      } catch (e) {
+        return json(res, 400, { error: `El modelo no tiene esqueleto humanoide y no se pudo completar: ${e instanceof Error ? e.message : e}` });
+      }
+      saveAtomic(characters.paths(active.id).avatar, model);
       console.log(`[avatar] saved your model (${(body.length / 1e6).toFixed(1)} MB)`);
       return json(res, 200, { saved: true });
     } catch (err) {
       const tooLarge = err instanceof Error && err.message === "too large";
       return json(res, tooLarge ? 413 : 500, { error: tooLarge ? "El modelo es demasiado grande (max. 150 MB)." : String(err) });
+    }
+  }
+  // Parts of her model you chose to hide (e.g. weapons). null = never chosen (the app hides weapons by default).
+  if (path === "/avatar/parts" && req.method === "GET") {
+    const f = characters.paths(active.id).parts;
+    try {
+      return json(res, 200, { hidden: existsSync(f) ? (JSON.parse(readFileSync(f, "utf8")) as { hidden: string[] }).hidden : null });
+    } catch {
+      return json(res, 200, { hidden: null });
+    }
+  }
+  if (path === "/avatar/parts" && req.method === "POST") {
+    try {
+      const { hidden } = JSON.parse((await readBody(req, 16 * 1024)).toString("utf8")) as { hidden?: unknown };
+      if (!Array.isArray(hidden) || hidden.length > 200 || !hidden.every((h) => typeof h === "string" && h.length <= 120)) throw new Error("lista no valida");
+      saveAtomic(characters.paths(active.id).parts, Buffer.from(JSON.stringify({ hidden })));
+      return json(res, 200, { hidden });
+    } catch (err) {
+      return json(res, 400, { error: err instanceof Error ? err.message : String(err) });
     }
   }
   if (path === "/avatar" && req.method === "DELETE") return json(res, 200, { removed: removeIfExists(characters.paths(active.id).avatar) });

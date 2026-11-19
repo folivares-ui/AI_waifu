@@ -4,6 +4,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 import type { Emotion, TouchRegion } from "@waifu/core";
 import { addSpringChains, faceFraming, fullFraming, hideHelperMeshes, toonify } from "./avatarFixups";
+import { collectParts } from "./modelParts";
 import { BoneFaceRig, CHANNEL_NAMES, RIG_POSES, type Channel } from "./boneFace";
 import { REACTIONS, StrokeTracker, TouchMap, envelope } from "./petting";
 
@@ -15,6 +16,10 @@ export interface AvatarProps {
   getLevel?: () => number;
   /** She was stroked on this body region with the cursor (fires once per stroke, at most every ~2.5 s per region). */
   onTouch?: (region: TouchRegion) => void;
+  /** Model parts to hide (e.g. a weapon in her hand), by part name (see modelParts.ts). */
+  hiddenParts?: string[];
+  /** Called once the model is loaded, with the names of its parts. */
+  onParts?: (parts: string[]) => void;
 }
 
 /** Floating hearts / sweat drops next to the cursor (rendered by AvatarStage). */
@@ -45,6 +50,13 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
   const host = useRef<HTMLDivElement>(null);
   const live = useRef(props);
   live.current = props;
+  const parts = useRef<Map<string, THREE.Object3D[]>>(new Map());
+  const applyHidden = () => {
+    const hide = new Set(live.current.hiddenParts ?? []);
+    for (const [name, objs] of parts.current) for (const o of objs) o.visible = !hide.has(name);
+  };
+  // Hide/show parts whenever the choice changes.
+  useEffect(applyHidden, [props.hiddenParts]);
 
   useEffect(() => {
     const el = host.current!;
@@ -126,6 +138,10 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         scene.add(v.scene);
         // Repairs for models converted from other formats (no-ops for proper VRM models).
         const hidden = hideHelperMeshes(v);
+        // Parts the user can hide (helper meshes hidden above are not offered).
+        parts.current = new Map([...collectParts(v.scene)].map(([n, objs]) => [n, objs.filter((o) => o.visible)] as const).filter(([, objs]) => objs.length > 0));
+        applyHidden();
+        live.current.onParts?.([...parts.current.keys()]);
         const tooned = toonify(v);
         rig = BoneFaceRig.detect(v); // must run in the rest pose
         touchMap = new TouchMap(v);

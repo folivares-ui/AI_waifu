@@ -98,10 +98,11 @@ export class Characters {
         legacyVoice: join(this.dataDir, "voices", "rice-shower", "rice-ref-2.wav"),
         memory: this.defaultMemory,
         growth: join(this.dataDir, "growth.json"),
+        parts: join(this.dataDir, "avatars", "parts.json"),
       };
     }
     const dir = join(this.dataDir, "characters", id);
-    return { avatar: join(dir, "avatar.vrm"), voice: join(dir, "voice-ref.wav"), legacyVoice: undefined as string | undefined, memory: join(dir, "memory.json"), growth: join(dir, "growth.json") };
+    return { avatar: join(dir, "avatar.vrm"), voice: join(dir, "voice-ref.wav"), legacyVoice: undefined as string | undefined, memory: join(dir, "memory.json"), growth: join(dir, "growth.json"), parts: join(dir, "parts.json") };
   }
 
   /** The voice sample to use for her VoiceStudio voice (uploaded one, else a clip prepared earlier). */

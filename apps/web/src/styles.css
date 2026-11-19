@@ -278,3 +278,11 @@ h1 { overflow: hidden; text-overflow: ellipsis; }
 .recent ul { margin: 6px 0 0; padding-left: 16px; display: flex; flex-direction: column; gap: 3px; }
 .recent li span { font-weight: 800; }
 .small-btn { align-self: flex-start; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255, 255, 255, .06); color: var(--text); font: inherit; font-size: .82rem; font-weight: 700; cursor: pointer; }
+
+/* Model parts (settings) */
+.row.parts { flex-direction: column; align-items: stretch; }
+.part-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.part-list label { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 10px; background: rgba(255, 255, 255, .05); border: 1px solid var(--line); font-size: .85rem; font-weight: 600; cursor: pointer; }
+.part-list input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
+.part-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.part-list .tag { margin-left: auto; padding: 1px 6px; border-radius: 6px; background: rgba(226, 69, 124, .25); color: #ffc0d4; font-size: .68rem; }

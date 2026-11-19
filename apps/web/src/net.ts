@@ -83,3 +83,7 @@ export interface GrowthView {
 }
 export const getGrowth = () => api<GrowthView>("/growth");
 export const resetGrowth = () => api<GrowthView>("/growth/reset", { method: "POST" });
+
+/** Parts of the active character's model the user hid (null = never chosen). */
+export const getHiddenParts = () => api<{ hidden: string[] | null }>("/avatar/parts");
+export const saveHiddenParts = (hidden: string[]) => api<{ hidden: string[] }>("/avatar/parts", { method: "POST", body: JSON.stringify({ hidden }) });
