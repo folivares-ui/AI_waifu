@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import type { VRM } from "@pixiv/three-vrm";
-import { DrawnBrows } from "./drawnBrows";
 
 /**
  * Eyelids and mouth opening for models that have neither blendshapes nor eyelid/jaw bones (e.g. models converted
@@ -487,7 +486,7 @@ function eyebrows(
     const x1 = eye.x0 + cols[cols.length - 1] * RES;
     const ex = (x0 + x1) / 2;
     const top = openingAt(eye, ex)!.top;
-    const unit = Math.max(0.0025, Math.min(0.006, 0.3 * eye.gmax));
+    const unit = Math.max(0.003, Math.min(0.007, 0.38 * eye.gmax));
     meshes.forEach((m, mi) => {
       for (const c of comps[mi]) {
         if (mi === face && c.length > m.pos.length / 6) continue; // the face skin itself
@@ -504,9 +503,12 @@ function eyebrows(
         pieces.push({ mesh: mi, verts: c });
         for (const i of c) {
           const t = Math.max(0, Math.min(1, (Math.abs(vtx(m, i)[0] - midX) - inner) / (outer - inner || 1))); // 0 inner .. 1 outer
-          put("browUp", mi, i, 0, unit, 0);
-          put("browAngry", mi, i, 0, unit * (-0.9 + 1.4 * t), 0);
-          put("browSad", mi, i, 0, unit * (0.9 - 1.4 * t), 0);
+          // Anime-style, clearly readable: angry = inner end bent down hard and pulled towards the nose, outer end
+          // up; sad = inner end up (also drawn together), outer end down; surprised = up, more in the middle (arch).
+          const inn = Math.pow(1 - t, 1.5);
+          put("browUp", mi, i, 0, unit * (1 + 0.35 * Math.sin(Math.PI * t)), 0);
+          put("browAngry", mi, i, inward * unit * 0.3 * (1 - t), unit * (-1.2 * inn + 0.6 * t), 0);
+          put("browSad", mi, i, inward * unit * 0.2 * (1 - t), unit * (1.2 * inn - 0.5 * t), 0);
           put("browFurrow", mi, i, inward * unit * 0.45 * (1 - t), -unit * 0.25 * (1 - t), 0);
           moved++;
         }
@@ -685,8 +687,8 @@ export class SynthFace {
   readonly hasMouth: boolean;
   /** Eyebrow / mouth-shape channels it built (faces with no bones at all). */
   readonly extraChannels: string[];
-  /** Eyebrows drawn anew (see drawnBrows.ts), when the model's own could be replaced. */
-  brows?: DrawnBrows;
+  /** How many eyebrow meshes are drawn over the hair. */
+  browsOnTop = 0;
 
   private constructor(slots: SynthFace["slots"], hasEyes: boolean, hasMouth: boolean, extraChannels: string[]) {
     this.slots = slots;
@@ -797,15 +799,23 @@ export class SynthFace {
       slots.push(slot);
     });
     const face = new SynthFace(slots, res.info.eyes > 0, res.info.mouthWidth !== undefined, Object.keys(res.extra));
-    // The model's own eyebrows, when they are meshes of their own: drawn anew over the hair (see drawnBrows.ts).
+    // The model's own eyebrows, when they are meshes of their own: in anime games they are drawn over the fringe
+    // (a special pass the converted model lost), so they hide under the hair. Draw them after the hair, on top.
+    // They keep their own shape and move with the eyebrow morphs above (up, angry, sad, furrow).
     if (expressive && res.brows.length) {
       const byMesh = new Map<number, number>();
       for (const b of res.brows) byMesh.set(b.mesh, (byMesh.get(b.mesh) ?? 0) + b.verts.length);
-      const whole = [...byMesh].every(([mi, n]) => n === inputs[mi].pos.length / 3);
-      if (whole) {
-        const pieces = res.brows.map((b) => ({ mesh: used[b.mesh], points: b.verts.map((i) => [inputs[b.mesh].pos[i * 3], inputs[b.mesh].pos[i * 3 + 1], inputs[b.mesh].pos[i * 3 + 2]] as V3), verts: b.verts }));
-        face.brows = DrawnBrows.build(head, pieces, res.info.gap[0] ?? 0.015);
-        if (face.brows) for (const mi of byMesh.keys()) for (const mat of [used[mi].material].flat()) mat.visible = false;
+      for (const [mi, n] of byMesh) {
+        if (n !== inputs[mi].pos.length / 3) continue; // shares its mesh with other parts: leave it as it is
+        const m = used[mi];
+        for (const mat of [m.material].flat()) {
+          mat.depthTest = false;
+          mat.depthWrite = false;
+          mat.transparent = true;
+          mat.needsUpdate = true;
+        }
+        m.renderOrder = 100;
+        face.browsOnTop++;
       }
     }
     return face;
@@ -836,6 +846,5 @@ export class SynthFace {
       if (s.mouth !== undefined) inf[s.mouth] = open;
       for (const [c, k] of s.extra) inf[k] = w[c] ?? 0;
     }
-    this.brows?.apply(w);
   }
 }

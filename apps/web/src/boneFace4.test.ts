@@ -164,21 +164,3 @@ describe("faces with no bones at all (eyebrows and mouth shapes from the mesh)",
   });
 });
 
-describe("eyebrows drawn anew (over the hair)", () => {
-  it("builds two arched eyebrows where the old ones were, that react to the eyebrow channels", async () => {
-    const { DrawnBrows } = await import("./drawnBrows");
-    const head = new THREE.Object3D();
-    const pts = (x0: number, x1: number): V3[] => Array.from({ length: 12 }, (_, i) => [x0 + ((x1 - x0) * i) / 11, 0.03 + (i % 2) * 0.004, 0.05]);
-    const mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
-    const brows = DrawnBrows.build(head, [{ mesh, points: [...pts(0.01, 0.04), ...pts(-0.01, -0.04)], verts: [] }], 0.016)!;
-    expect(head.children.filter((c) => c.name === "drawn eyebrow")).toHaveLength(2);
-    const eyebrow = head.children[0] as THREE.Mesh;
-    const y = (i: number) => (eyebrow.geometry.attributes.position as THREE.BufferAttribute).getY(i * 4); // top row, segment i
-    const rest = [y(0), y(18)];
-    brows.apply({ browAngry: 1 });
-    expect(y(0)).toBeLessThan(rest[0]); // inner end down
-    expect(y(18)).toBeGreaterThan(rest[1] - 0.001); // outer end not down
-    brows.apply({ browUp: 1 });
-    expect(y(0)).toBeGreaterThan(rest[0]);
-  });
-});
