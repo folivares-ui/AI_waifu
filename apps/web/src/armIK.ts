@@ -27,7 +27,14 @@ const SEEDS: Record<ArmTargets, ArmSolution[]> = {
   crossBack: [{ upper: [-0.4, -1, -1.25], lower: -2.2 }, { upper: [0, -0.9, -1.1], lower: -2.4 }],
 };
 
-export function solveArmPoses(vrm: VRM): ArmSolutions {
+/** Something that says how deep inside her body a point is (< 1 = inside), see torsoGuard.ts. */
+export interface BodyShape {
+  depth(world: THREE.Vector3): number;
+  /** How far her body reaches forward (cm in front of the hips) at a height (cm above the hips). */
+  frontAt?(heightCm: number): number | undefined;
+}
+
+export function solveArmPoses(vrm: VRM, body?: BodyShape): ArmSolutions {
   const H = vrm.humanoid;
   const k = vrm.meta.metaVersion === "0" ? -1 : 1;
   const N = (n: string) => H.getNormalizedBoneNode(n as never);
@@ -47,7 +54,13 @@ export function solveArmPoses(vrm: VRM): ArmSolutions {
     H.update();
     vrm.scene.updateMatrixWorld(true);
     const hips = W("hips");
-    return { hand: W("leftHand").sub(hips).multiplyScalar(100), elbow: W("leftLowerArm").sub(hips).multiplyScalar(100) };
+    // how far the arm goes into her body (0 = not at all), sampled along the upper arm and forearm
+    let inside = 0;
+    if (body) {
+      const a = W("leftUpperArm"), e = W("leftLowerArm"), h = W("leftHand");
+      for (const p of [a.clone().lerp(e, 0.6), e, e.clone().lerp(h, 0.33), e.clone().lerp(h, 0.66), h]) inside += Math.max(0, 1.05 - body.depth(p));
+    }
+    return { hand: W("leftHand").sub(hips).multiplyScalar(100), elbow: W("leftLowerArm").sub(hips).multiplyScalar(100), inside };
   };
   try {
     vrm.scene.updateMatrixWorld(true);
@@ -64,8 +77,9 @@ export function solveArmPoses(vrm: VRM): ArmSolutions {
       chin: [0, headY - 9, headZ + 9],
       across: [-4, headY * 0.12, 14],
       // Arms crossed over the chest: one forearm in front, the other a little lower and closer to the body.
-      crossFront: [-shoulderW * 0.36, headY * 0.58, 14],
-      crossBack: [-shoulderW * 0.3, headY * 0.48, 8],
+      // in front of her real chest/belly surface when it is known (bigger busts or bulky clothes need more room)
+      crossFront: [-shoulderW * 0.36, headY * 0.58, Math.max(14, (body?.frontAt?.(headY * 0.58) ?? 0) + 8)],
+      crossBack: [-shoulderW * 0.3, headY * 0.48, Math.max(8, (body?.frontAt?.(headY * 0.48) ?? 0) + 4)],
     };
     const out: ArmSolutions = {};
     for (const target of Object.keys(goal) as ArmTargets[]) {
@@ -75,7 +89,7 @@ export function solveArmPoses(vrm: VRM): ArmSolutions {
         const m = measure();
         const elbowIn = Math.max(0, hipW * 0.7 - Math.abs(m.elbow.x)) + Math.max(0, -m.elbow.z - 6); // elbow never inside her
         const limits = Math.max(0, Math.abs(s.upper[0]) - 1.7) + Math.max(0, Math.abs(s.upper[1]) - 1.2) + Math.max(0, -s.lower - 2.6) + Math.max(0, s.lower);
-        return Math.hypot(m.hand.x - g[0], m.hand.y - g[1], m.hand.z - g[2]) + 2 * elbowIn + 50 * limits;
+        return Math.hypot(m.hand.x - g[0], m.hand.y - g[1], m.hand.z - g[2]) + 2 * elbowIn + 50 * limits + 40 * m.inside;
       };
       // Coordinate descent from each seed; keep the best.
       let best = { s: SEEDS[target][0], c: Infinity };

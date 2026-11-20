@@ -105,7 +105,9 @@ export function bodyPose(s: BodyState): BodyPose {
   const breath = Math.sin(t * 1.5);
 
   // Idle: arms sway a little with the breath, never perfectly still (wider for energetic characters).
-  const sway = (0.035 * Math.sin(t * 0.8) + 0.015 * breath) * energy;
+  // The arms swing out more than in: an inward swing is what makes them brush through the body.
+  const swayRaw = (0.035 * Math.sin(t * 0.8) + 0.015 * breath) * energy;
+  const sway = swayRaw > 0 ? swayRaw : swayRaw * 0.25;
   pose.leftUpperArm = add(pose.leftUpperArm, [0.03 * energy * Math.sin(t * 0.7), 0, sway]);
   pose.rightUpperArm = add(pose.rightUpperArm, [0.03 * energy * Math.sin(t * 0.7 + 1.3), 0, -sway]);
   pose.leftLowerArm = add(pose.leftLowerArm, [0, -0.05 * energy * (1 + Math.sin(t * 0.9)), 0]);

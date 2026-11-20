@@ -59,4 +59,11 @@ describe("body language", () => {
     const shrug = (p: ReturnType<typeof at>) => p.leftShoulder![2];
     expect(range(lively, shrug)).toBeGreaterThan(2 * range(undefined, shrug));
   });
+  it("the arms swing out more than in (inward swings are what brush through the body)", () => {
+    const style = { energy: 1.7, tempo: 1.35 };
+    const z = Array.from({ length: 400 }, (_, i) => at(i * 0.05, { style }).leftUpperArm![2] - -1.2);
+    const out = Math.max(...z);
+    const inward = -Math.min(...z);
+    expect(out).toBeGreaterThan(2.5 * inward);
+  });
 });

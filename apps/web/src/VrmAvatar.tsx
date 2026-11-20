@@ -7,6 +7,7 @@ import { addSpringChains, faceFraming, fullFraming, hideHelperMeshes, toonify } 
 import { collectParts } from "./modelParts";
 import { BODY_BONES, bodyPose } from "./bodyMotion";
 import { solveArmPoses, type ArmSolutions } from "./armIK";
+import { TorsoGuard } from "./torsoGuard";
 import { BoneFaceRig, CHANNEL_NAMES, RIG_POSES, type Channel } from "./boneFace";
 import { REACTIONS, StrokeTracker, TouchMap, envelope } from "./petting";
 
@@ -87,6 +88,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
     // Models without expressions but with facial bones are animated through this rig instead.
     let rig: BoneFaceRig | undefined;
     let armPoses: ArmSolutions = {};
+    let torso: TorsoGuard | undefined;
     let springs: ReturnType<typeof addSpringChains>;
     const rigCur = Object.fromEntries(CHANNEL_NAMES.map((n) => [n, 0])) as Record<Channel, number>;
     let nextTwitch = 3;
@@ -150,7 +152,8 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         live.current.onParts?.([...parts.current.keys()]);
         const tooned = toonify(v);
         rig = BoneFaceRig.detect(v); // must run in the rest pose
-        armPoses = solveArmPoses(v); // hands on the hips, at the chin... for this model's proportions
+        torso = TorsoGuard.measure(v); // her real body shape, so the arms never go through it
+        armPoses = solveArmPoses(v, torso); // hands on the hips, at the chin... for her proportions, outside her body
         if (import.meta.env.DEV) console.info(`[avatar] arm poses solved: ${Object.keys(armPoses).join(", ") || "none"}`);
         touchMap = new TouchMap(v);
         springs = addSpringChains(v);
@@ -308,7 +311,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
       // VRM 0.x normalized bones are mirrored (x and z flip); poses are written in VRM 1.0 convention.
       const armK = vrm.meta.metaVersion === "0" ? -1 : 1;
       const devBody = import.meta.env.DEV ? (window as unknown as { __bodyEmotion?: Emotion; __bodySpeaking?: boolean }) : undefined;
-      const body = bodyPose({ t, emotion: devBody?.__bodyEmotion ?? p.emotion, speaking: devBody?.__bodySpeaking ?? p.speaking, level: voiceLevel, listening: p.listening, arms: armPoses, style: p.motion });
+      const body = bodyPose({ t, emotion: devBody?.__bodyEmotion ?? p.emotion, speaking: devBody?.__bodySpeaking ?? p.speaking, level: voiceLevel, listening: p.listening, arms: armPoses, style: (import.meta.env.DEV ? (window as unknown as { __bodyStyle?: MotionStyle }).__bodyStyle : undefined) ?? p.motion });
       const follow = Math.min(1, dt * 4.5); // ~0.3 s to settle into a new pose
       for (const name of BODY_BONES) {
         const e = body[name];
@@ -342,6 +345,10 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
       }
 
       vrm.update(dt);
+      // Arms never pass through her body: corrected after the pose is applied (see torsoGuard.ts).
+      const guardOff = import.meta.env.DEV && (window as unknown as { __guardOff?: boolean }).__guardOff;
+      const fixes = torso && !guardOff ? torso.apply(dt, { left: armK, right: -armK }) : 0;
+      if (import.meta.env.DEV) Object.assign(window, { __guardFixes: fixes, __armMinDepth: torso?.minDepth() });
       springs?.update(dt);
       renderer.render(scene, camera);
 
