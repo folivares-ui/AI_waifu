@@ -59,4 +59,25 @@ describe("repairing VRM files without a humanoid bone list", () => {
     const glb = writeGlb({ nodes: [{ name: "Cube" }], extensions: { VRMC_vrm: { humanoid: { humanBones: {} } } } }, undefined);
     expect(() => fixVrm(glb)).toThrow(/No se reconocen estos huesos del modelo: hips, spine, head/);
   });
+  it("ignores Blender's duplicate suffixes (Chest.001_011 is the chest, Upper Chest stays upper chest)", () => {
+    const names = ["Hips_01", "Spine_010", "Chest.001_011", "Upper Chest_012", "Neck1_050", "Head_051", "Left leg_02", "Left knee_03", "Left ankle_04", "Right leg_06", "Right knee_07", "Right ankle_08", "Left arm_014", "Left elbow_015", "Left wrist_016", "Right arm_033", "Right elbow_00", "Right wrist_034"];
+    const nodes: { name: string; children?: number[] }[] = names.map((name) => ({ name }));
+    nodes[0].children = [1, 6, 9];
+    nodes[1].children = [2];
+    nodes[2].children = [3];
+    nodes[3].children = [4, 12, 15];
+    nodes[4].children = [5];
+    nodes[6].children = [7];
+    nodes[7].children = [8];
+    nodes[9].children = [10];
+    nodes[10].children = [11];
+    nodes[12].children = [13];
+    nodes[13].children = [14];
+    nodes[15].children = [16];
+    nodes[16].children = [17];
+    const map = guessHumanoid(nodes, new Set());
+    const named = Object.fromEntries(Object.entries(map).map(([b, i]) => [b, nodes[i].name]));
+    expect(named).toMatchObject({ hips: "Hips_01", spine: "Spine_010", chest: "Chest.001_011", upperChest: "Upper Chest_012", leftHand: "Left wrist_016", rightLowerArm: "Right elbow_00" });
+  });
 });
+

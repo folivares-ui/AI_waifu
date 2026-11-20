@@ -44,7 +44,7 @@ export function writeGlb(json: unknown, binChunk: Buffer | undefined): Buffer {
 const clean = (n: string) =>
   n
     .replace(/^mixamorig\d*:/i, "")
-    .replace(/[_.]\d+$/, "")
+    .replace(/([_.]\d+)+$/, "")
     .replace(/^(J_Bip_|Bip0?1[ _]?|DEF[-_]|ORG[-_])/i, "")
     .toLowerCase()
     .trim();
