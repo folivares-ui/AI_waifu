@@ -133,6 +133,11 @@ export class BoneFaceRig {
       const head = vrm.humanoid.getRawBoneNode("head");
       if (head) for (const m of geometryMoves(head, candidates)) add(m.channel, m.node, m);
     }
+    // Family 3: "F_L_EyelidTop", "F_L_EyeBrows1..3", "F_L_MouthCorners", "F_C_Jaw"... (also measured on the model).
+    if (this.channels.size === 0) {
+      const head = vrm.humanoid.getRawBoneNode("head");
+      if (head) for (const m of geometryMovesF(head, candidates)) add(m.channel, m.node, m);
+    }
     this.driven = [...byNode.values()];
   }
 
@@ -240,6 +245,84 @@ export function geometryMoves(head: THREE.Object3D, nodes: THREE.Object3D[]): Ge
     const lowerLip = find(/^U lip$/)[0];
     // Opening angle for ~11 mm at the lower lip, whatever the distance between the jaw pivot and the lips.
     const reach = lowerLip ? Math.max(30, Math.hypot(pos(lowerLip).y - pos(jaw).y, pos(lowerLip).z - pos(jaw).z)) : 100;
+    out.push({ channel: "mouthOpen", node: jaw, rot: [11 / reach, 0, 0] });
+  }
+  return out;
+}
+
+// ---------- family 3: "F_L_EyelidTop", "F_L_EyelidBottom", "F_L_EyeBrows1..3", "F_L_MouthCorners", "F_C_Jaw" -------
+
+/** "F_L_EyelidTop_064" -> "F L EyelidTop". */
+const famF = (n: string) => n.replace(/_\d{1,4}$/, "").replace(/_/g, " ").trim();
+
+/**
+ * One bone per eyelid (the upper one hangs from the lower one), eyebrows as chains (inner -> middle -> outer),
+ * mouth corners, upper lip on the head and lower lip on the jaw. Desired movements are given in world space per
+ * bone and turned into each bone's own share by removing what its parent (also moving) already contributes.
+ */
+export function geometryMovesF(head: THREE.Object3D, nodes: THREE.Object3D[]): GeoMove[] {
+  head.updateMatrixWorld(true);
+  const origin = head.getWorldPosition(new THREE.Vector3());
+  const pos = (o: THREE.Object3D) => o.getWorldPosition(new THREE.Vector3()).sub(origin).multiplyScalar(1000); // mm
+  const one = (re: RegExp) => nodes.find((o) => re.test(famF(o.name)));
+  // channel -> bone -> desired WORLD offset (mm)
+  const want = new Map<Channel, Map<THREE.Object3D, THREE.Vector3>>();
+  const put = (channel: Channel, node: THREE.Object3D | undefined, x: number, y: number, z: number) => {
+    if (!node) return;
+    if (!want.has(channel)) want.set(channel, new Map());
+    want.get(channel)!.set(node, new THREE.Vector3(x, y, z));
+  };
+
+  for (const side of ["L", "R"]) {
+    const top = one(new RegExp(`^F ${side} EyelidTop$`));
+    const bottom = one(new RegExp(`^F ${side} EyelidBottom$`));
+    if (top && bottom) {
+      const gap = Math.max(0, pos(top).y - pos(bottom).y);
+      put("blink", top, 0, -0.85 * gap, 0);
+      put("blink", bottom, 0, 0.1 * gap, 0);
+      put("eyeSmile", top, 0, -0.45 * gap, 0);
+      put("eyeSmile", bottom, 0, 0.25 * gap, 0);
+      put("eyeWide", top, 0, 0.12 * gap, 0);
+      put("eyeWide", bottom, 0, -0.05 * gap, 0);
+      const unit = Math.max(3, Math.min(8, gap * 0.3));
+      const brows = [1, 2, 3].map((i) => one(new RegExp(`^F ${side} EyeBrows${i}$`)));
+      brows.forEach((b, i) => {
+        const t = i / 2; // 0 inner .. 1 outer
+        put("browUp", b, 0, unit, 0);
+        put("browAngry", b, 0, unit * (-0.9 + 1.4 * t), 0);
+        put("browSad", b, 0, unit * (0.9 - 1.4 * t), 0);
+      });
+    }
+    const corner = one(new RegExp(`^F ${side} MouthCorners$`));
+    const out = side === "L" ? 1 : -1;
+    put("mouthSmile", corner, out * 1.5, 3, 0);
+    put("mouthFrown", corner, 0, -2.6, 0);
+    put("mouthNarrow", corner, -out * 2.5, 0, 0);
+    put("mouthWide", corner, out * 2.5, 0.4, 0);
+    put("mouthSmile", one(new RegExp(`^F ${side} MouthTop$`)), out * 0.4, 0.8, 0);
+    put("mouthFrown", one(new RegExp(`^F ${side} MouthBottom$`)), 0, -0.8, 0);
+  }
+
+  const out: GeoMove[] = [];
+  for (const [channel, bones] of want) {
+    for (const [node, w] of bones) {
+      // Subtract what the closest moving ancestor already does (translations add up along a chain).
+      let own = w.clone();
+      for (let p = node.parent; p; p = p.parent) {
+        const pw = bones.get(p);
+        if (pw) {
+          own = own.sub(pw);
+          break;
+        }
+      }
+      out.push({ channel, node, mm: [own.x, own.y, own.z] });
+    }
+  }
+  // Jaw: rotating it opens the mouth (the lower lip hangs from it).
+  const jaw = one(/^F C Jaw$/);
+  if (jaw) {
+    const lip = one(/^F C MouthBottom$/);
+    const reach = lip ? Math.max(30, Math.hypot(pos(lip).y - pos(jaw).y, pos(lip).z - pos(jaw).z)) : 90;
     out.push({ channel: "mouthOpen", node: jaw, rot: [11 / reach, 0, 0] });
   }
   return out;
