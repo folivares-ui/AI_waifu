@@ -54,13 +54,16 @@ const characters = new Characters(
   basename(process.env.SOUL_FILE ?? "default.soul.json").replace(/\.soul\.json$/, ""),
   process.env.MEMORY_FILE ? resolve(process.env.MEMORY_FILE) : undefined,
 );
+const describeFix = (r: { bones: number; scale?: number }) =>
+  [r.bones ? `${r.bones} humanoid bones recognised and added` : "", r.scale ? `resized x${r.scale.toFixed(2)} to a person's height` : ""].filter(Boolean).join(", ");
+
 /** Models saved before the repair existed are fixed (once) the first time they are served. */
 function repairSavedModel(file: string) {
   try {
     const r = fixVrm(readFileSync(file));
     if (r) {
       saveAtomic(file, r.fixed);
-      console.log(`[avatar] repaired the saved model (${r.bones} humanoid bones added)`);
+      console.log(`[avatar] repaired the saved model (${describeFix(r)})`);
     }
   } catch (e) {
     console.warn(`[avatar] the saved model could not be repaired: ${e instanceof Error ? e.message : e}`);
@@ -264,7 +267,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
         const r = fixVrm(body);
         if (r) {
           model = r.fixed;
-          console.log(`[avatar] the model had no humanoid bone list: ${r.bones} bones recognised and added`);
+          console.log(`[avatar] repaired the model: ${describeFix(r)}`);
         }
       } catch (e) {
         return json(res, 400, { error: `El modelo no tiene esqueleto humanoide y no se pudo completar: ${e instanceof Error ? e.message : e}` });

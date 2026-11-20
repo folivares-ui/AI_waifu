@@ -134,3 +134,32 @@ describe("synthesized lids and jaw (models without eyelid or jaw bones)", () => 
     expect(open.lower).toBe(0);
   });
 });
+
+describe("faces with no bones at all (eyebrows and mouth shapes from the mesh)", () => {
+  const meshes = flatFace();
+  // an eyebrow strip above the eye
+  const brow: number[] = [];
+  const bidx: number[] = [];
+  for (let i = 0; i <= 10; i++) brow.push(0.01 + i * 0.002, 0.031, 0.0305, 0.01 + i * 0.002, 0.033, 0.0305);
+  for (let i = 0; i < 10; i++) bidx.push(i * 2, i * 2 + 2, i * 2 + 3, i * 2, i * 2 + 3, i * 2 + 1);
+  meshes.push({ pos: new Float32Array(brow), index: bidx, onHead: new Uint8Array(brow.length / 3).fill(1) });
+  // two eye bones (only the right one has an opening here), no mouth bones: the slit is found below the eyes
+  const res = buildFaceMorphs(meshes, [[0.02, 0.015, 0.02], [-0.02, 0.015, 0.02]], undefined, true)!;
+
+  it("finds the mouth without bones at its corners", () => {
+    expect(res.info.mouthWidth).toBeGreaterThan(0.02);
+  });
+  it("angry brows: inner end down, outer end up; raised brows go up", () => {
+    const d = res.extra.browAngry[3]!;
+    expect(d[0 * 3 + 1]).toBeLessThan(0); // x = 10 mm: inner end (closer to the nose)
+    expect(d[20 * 3 + 1]).toBeGreaterThan(0); // x = 30 mm: outer end
+    expect(Math.min(...Array.from({ length: 22 }, (_, i) => res.extra.browUp[3]![i * 3 + 1]))).toBeGreaterThan(0);
+  });
+  it("smile lifts the mouth corners", () => {
+    const face = meshes[0];
+    let best = 0;
+    for (let i = 1; i < face.pos.length / 3; i++) if (Math.hypot(face.pos[i * 3] - 0.014, face.pos[i * 3 + 1] + 0.02) < Math.hypot(face.pos[best * 3] - 0.014, face.pos[best * 3 + 1] + 0.02)) best = i;
+    expect(res.extra.mouthSmile[0]![best * 3 + 1]).toBeGreaterThan(0);
+    expect(res.extra.mouthFrown[0]![best * 3 + 1]).toBeLessThan(0);
+  });
+});

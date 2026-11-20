@@ -30,8 +30,13 @@ export interface FaceMorphs {
   upper: (Float32Array | undefined)[];
   lower: (Float32Array | undefined)[];
   mouth: (Float32Array | undefined)[];
+  /** Eyebrow and mouth-shape channels (only with `expressive`): channel -> per mesh displacements. */
+  extra: Record<string, (Float32Array | undefined)[]>;
   info: { eyes: number; gap: number[]; mouthWidth?: number; moved: number };
 }
+
+/** Channels built for faces with no bones at all (eyebrows and mouth shapes). */
+export const EXPRESSIVE_CHANNELS = ["browUp", "browAngry", "browSad", "browFurrow", "mouthSmile", "mouthFrown", "mouthNarrow", "mouthWide", "mouthPout"] as const;
 
 const RES = 0.0005; // grid cell: 0.5 mm
 
@@ -213,14 +218,18 @@ function openingAt(e: Eye, x: number): { top: number; bottom: number; gap: numbe
  * through it (no face skin in front of it).
  */
 function findEye(meshes: FaceMeshIn[], comps: number[][][], center: V3): { eye: Eye; face: number } | undefined {
-  // 1. A hole of some mesh around the eye centre, with that mesh all around it (not the outline of a patch).
-  let best: { loop: V3[]; mesh: number; area: number } | undefined;
+  // 1. A hole of some mesh at the eye, with that mesh all around it (not the outline of a patch). The eye bone is
+  // usually inside it; in some rigs it sits off it (at the back of the eyeball), so the nearest hole close by.
+  let best: { loop: V3[]; mesh: number; area: number; d: number; front: number; size: number } | undefined;
   meshes.forEach((m, mi) => {
     for (const loop of boundaryLoops(m)) {
       const { mn, mx } = bbox(loop);
       const w = mx[0] - mn[0];
       const h = mx[1] - mn[1];
-      if (w < 0.008 || w > 0.09 || h < 0.004 || h > 0.07 || !inPolygon(center[0], center[1], loop)) continue;
+      if (w < 0.008 || w > 0.09 || h < 0.004 || h > 0.07) continue;
+      const inside = inPolygon(center[0], center[1], loop);
+      const d = inside ? 0 : Math.hypot((mn[0] + mx[0]) / 2 - center[0], (mn[1] + mx[1]) / 2 - center[1]);
+      if (d > Math.max(w, h)) continue;
       let around = 0;
       for (let i = 0; i < m.pos.length / 3; i++) {
         const [x, y] = vtx(m, i);
@@ -229,7 +238,18 @@ function findEye(meshes: FaceMeshIn[], comps: number[][][], center: V3): { eye: 
         if (x > mn[0] && x < mx[0] && y > mx[1] + 0.003 && y < mx[1] + 0.03) around |= 4;
         if (x > mn[0] && x < mx[0] && y < mn[1] - 0.003 && y > mn[1] - 0.03) around |= 8;
       }
-      if (around === 15 && (!best || w * h > best.area)) best = { loop, mesh: mi, area: w * h };
+      // the eye is on the front of the face: of the holes near it, the front-most (holes in the hair behind the head
+      // can be just as close); between equally front-most ones, the bigger mesh (the face itself)
+      const front = mx[2];
+      const size = m.pos.length;
+      // Holes around the eye bone win (the biggest: the socket rather than a patch of eyeliner inside it); only
+      // if none surrounds it, the front-most one nearby.
+      const better = !best
+        ? true
+        : d === 0 || best.d === 0
+          ? d === 0 && (best.d !== 0 || w * h > best.area)
+          : front > best.front + 0.002 || (Math.abs(front - best.front) <= 0.002 && (size > best.size || (size === best.size && d < best.d)));
+      if (around === 15 && better) best = { loop, mesh: mi, area: w * h, d, front, size };
     }
   });
   if (!best) return undefined;
@@ -420,13 +440,84 @@ function lowerJaw(m: FaceMeshIn, mo: Mouth): Uint8Array {
   return out;
 }
 
+/**
+ * Without bones at the mouth corners: the slit of the face mesh below the eyes (a hole much wider than tall,
+ * centred between them), its ends being the corners.
+ */
+function guessMouthCorners(face: FaceMeshIn, eyes: [V3, V3]): [V3, V3] | undefined {
+  const ed = Math.hypot(eyes[0][0] - eyes[1][0], eyes[0][1] - eyes[1][1]);
+  const mx = (eyes[0][0] + eyes[1][0]) / 2;
+  const my = (eyes[0][1] + eyes[1][1]) / 2;
+  let best: V3[] | undefined;
+  for (const loop of boundaryLoops(face)) {
+    const { mn, mx: hi } = bbox(loop);
+    const w = hi[0] - mn[0];
+    const cy = (mn[1] + hi[1]) / 2;
+    if (w < 0.2 * ed || w > 1.2 * ed || hi[1] - mn[1] > 0.35 * w) continue;
+    if (Math.abs((mn[0] + hi[0]) / 2 - mx) > 0.15 * ed || cy > my - 0.4 * ed || cy < my - 1.8 * ed) continue;
+    if (!best || w > bbox(best).mx[0] - bbox(best).mn[0]) best = loop;
+  }
+  if (!best) return undefined;
+  const l = best.reduce((a, b) => (b[0] < a[0] ? b : a));
+  const r = best.reduce((a, b) => (b[0] > a[0] ? b : a));
+  return [l, r];
+}
+
+/**
+ * Eyebrows drawn as their own pieces above each eye (faces with no brow bones): they move up, tilt (angry / sad)
+ * and draw together. Returns how many vertices move.
+ */
+function eyebrows(
+  meshes: FaceMeshIn[],
+  comps: number[][][],
+  found: { eye: Eye; face: number }[],
+  eyes: V3[],
+  put: (channel: string, mi: number, i: number, x: number, y: number, z: number) => void,
+): number {
+  const midX = eyes.reduce((s, e) => s + e[0], 0) / eyes.length;
+  let moved = 0;
+  for (const { eye, face } of found) {
+    const cols = [...eye.top.keys()].filter((i) => isFinite(eye.top[i]));
+    if (!cols.length) continue;
+    const x0 = eye.x0 + cols[0] * RES;
+    const x1 = eye.x0 + cols[cols.length - 1] * RES;
+    const ex = (x0 + x1) / 2;
+    const top = openingAt(eye, ex)!.top;
+    const unit = Math.max(0.0025, Math.min(0.006, 0.3 * eye.gmax));
+    meshes.forEach((m, mi) => {
+      for (const c of comps[mi]) {
+        if (mi === face && c.length > m.pos.length / 6) continue; // the face skin itself
+        const pts = c.map((i) => vtx(m, i));
+        const { mn, mx } = bbox(pts);
+        const cx = (mn[0] + mx[0]) / 2;
+        // above the eye (clear of the lashes), over it, elongated
+        if (mn[1] < top + 0.35 * eye.gmax || mx[1] > top + 2.6 * eye.gmax) continue;
+        if (cx < x0 - 0.2 * (x1 - x0) || cx > x1 + 0.2 * (x1 - x0) || mx[0] - mn[0] < 0.4 * (x1 - x0) || mx[1] - mn[1] > 0.6 * (mx[0] - mn[0])) continue;
+        if (c.filter((i) => m.onHead[i]).length < c.length * 0.6) continue;
+        const inner = Math.min(Math.abs(mn[0] - midX), Math.abs(mx[0] - midX));
+        const outer = Math.max(Math.abs(mn[0] - midX), Math.abs(mx[0] - midX));
+        const inward = cx > midX ? -1 : 1; // towards the nose
+        for (const i of c) {
+          const t = Math.max(0, Math.min(1, (Math.abs(vtx(m, i)[0] - midX) - inner) / (outer - inner || 1))); // 0 inner .. 1 outer
+          put("browUp", mi, i, 0, unit, 0);
+          put("browAngry", mi, i, 0, unit * (-0.9 + 1.4 * t), 0);
+          put("browSad", mi, i, 0, unit * (0.9 - 1.4 * t), 0);
+          put("browFurrow", mi, i, inward * unit * 0.45 * (1 - t), -unit * 0.25 * (1 - t), 0);
+          moved++;
+        }
+      }
+    });
+  }
+  return moved;
+}
+
 // ---------- everything ----------
 
 /**
  * Builds the three morph targets. `eyes`: eyeball centres (face frame). `mouthCorners`: positions of the mouth
  * corners if the rig has bones there. Returns undefined if no eye opening is found.
  */
-export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?: [V3, V3]): FaceMorphs | undefined {
+export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?: [V3, V3], expressive = false): FaceMorphs | undefined {
   const comps = meshes.map(components);
   const found = eyes.map((c) => findEye(meshes, comps, c)).filter((x): x is { eye: Eye; face: number } => !!x);
   if (found.length === 0) return undefined;
@@ -486,9 +577,19 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
     });
   }
 
+  const extra: Record<string, (Float32Array | undefined)[]> = {};
+  const put = (channel: string, mi: number, i: number, x: number, y: number, z: number) => {
+    const arr = ((extra[channel] ??= meshes.map(() => undefined))[mi] ??= new Float32Array(meshes[mi].pos.length));
+    arr[i * 3] += x;
+    arr[i * 3 + 1] += y;
+    arr[i * 3 + 2] += z;
+  };
+  if (expressive) moved += eyebrows(meshes, comps, found, eyes, put);
+
   let mouthWidth: number | undefined;
-  if (mouthCorners) {
-    const mo = findMouth(meshes, found[0].face, mouthCorners);
+  const corners = mouthCorners ?? (eyes.length === 2 ? guessMouthCorners(meshes[found[0].face], eyes as [V3, V3]) : undefined);
+  if (corners) {
+    const mo = findMouth(meshes, found[0].face, corners);
     if (mo) {
       mouthWidth = mo.half * 2;
       const drop = Math.min(0.012, 0.3 * mouthWidth); // ~9 mm on a 3 cm wide mouth
@@ -526,9 +627,38 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
           moved++;
         }
       });
+      if (expressive) {
+        // Mouth shapes: the corners (and around them) move; for the pout, the middle of the lips comes forward.
+        const k = mouthWidth / 0.03; // sizes below are for a 3 cm wide mouth, in mm
+        const R = mo.half * 0.75;
+        const touching = meshes.map((_, mi) => mouth[mi] !== undefined || mi === face);
+        meshes.forEach((m, mi) => {
+          if (!touching[mi]) return;
+          const lower = mi === face ? lowerPart : undefined;
+          for (let i = 0; i < m.pos.length / 3; i++) {
+            const p = vtx(m, i);
+            if (Math.abs(p[2] - mo.cz) > 0.02) continue;
+            for (const side of [-1, 1]) {
+              const cxs = mo.cx + side * mo.half;
+              const d = Math.hypot(p[0] - cxs, p[1] - mo.lip(cxs));
+              const w = smooth(1 - d / R) * 0.001 * k;
+              if (w <= 0) continue;
+              put("mouthSmile", mi, i, side * 1.5 * w, 3 * w, 0);
+              put("mouthFrown", mi, i, 0, -2.6 * w, 0);
+              put("mouthNarrow", mi, i, -side * 2.5 * w, 0, 0);
+              put("mouthWide", mi, i, side * 2.5 * w, 0.4 * w, 0);
+              put("mouthPout", mi, i, 0, -2 * w, 0);
+              moved++;
+            }
+            const dc = Math.hypot((p[0] - mo.cx) / mo.half, (p[1] - mo.lip(p[0])) / (mo.half * 0.6));
+            const wc = smooth(1 - dc) * 0.001 * k;
+            if (wc > 0) put("mouthPout", mi, i, 0, (lower?.[i] ? 1.2 : 0.2) * wc, 1.6 * wc);
+          }
+        });
+      }
     }
   }
-  return { upper, lower, mouth, info: { eyes: found.length, gap: found.map((f) => f.eye.gmax), mouthWidth, moved } };
+  return { upper, lower, mouth, extra, info: { eyes: found.length, gap: found.map((f) => f.eye.gmax), mouthWidth, moved } };
 }
 
 // ---------- three.js glue ----------
@@ -539,25 +669,29 @@ export interface LidWeights {
   eyeSmile?: number;
   eyeWide?: number;
   mouthOpen?: number;
+  [channel: string]: number | undefined;
 }
 
 /** Morph targets installed on the model's meshes, driven by the face rig's channels. */
 export class SynthFace {
-  private slots: { mesh: THREE.Mesh; upper?: number; lower?: number; mouth?: number }[] = [];
+  private slots: { mesh: THREE.Mesh; upper?: number; lower?: number; mouth?: number; extra: [string, number][] }[] = [];
   readonly hasEyes: boolean;
   readonly hasMouth: boolean;
+  /** Eyebrow / mouth-shape channels it built (faces with no bones at all). */
+  readonly extraChannels: string[];
 
-  private constructor(slots: SynthFace["slots"], hasEyes: boolean, hasMouth: boolean) {
+  private constructor(slots: SynthFace["slots"], hasEyes: boolean, hasMouth: boolean, extraChannels: string[]) {
     this.slots = slots;
     this.hasEyes = hasEyes;
     this.hasMouth = hasMouth;
+    this.extraChannels = extraChannels;
   }
 
   /**
    * Call in the rest pose. `mouthCorners`: names of the bones at the mouth corners, if any.
    * Returns undefined when the face has no eye openings to work with.
    */
-  static build(vrm: VRM, mouthCorners?: [THREE.Object3D, THREE.Object3D]): SynthFace | undefined {
+  static build(vrm: VRM, mouthCorners?: [THREE.Object3D, THREE.Object3D], expressive = false): SynthFace | undefined {
     const H = vrm.humanoid;
     const head = H.getRawBoneNode("head");
     if (!head) return undefined;
@@ -583,8 +717,9 @@ export class SynthFace {
     const eyeBones = (["leftEye", "rightEye"] as const).map((n) => H.getRawBoneNode(n)).filter((b): b is THREE.Object3D => !!b);
     if (!used.length || eyeBones.length === 0) return undefined;
     const eyePos = eyeBones.map(world);
-    // Which way the face looks (+z after VRMUtils.rotateVRM0, but checked: the eyes are in front of the head bone).
-    const front = Math.sign(eyePos.reduce((s, p) => s + p.z, 0) / eyePos.length - world(head).z) || 1;
+    // VRM models face +z (VRMUtils.rotateVRM0 turns 0.x ones around). (Eye bones are no guide: in some rigs they
+    // sit at the back of the eyeball, behind the head bone.)
+    const front = 1;
     const toFace = (p: THREE.Vector3): V3 => [p.x, p.y, p.z * front];
 
     const inputs: FaceMeshIn[] = used.map((m) => {
@@ -612,6 +747,7 @@ export class SynthFace {
       inputs,
       eyePos.map(toFace),
       corners && corners[0] && corners[1] ? [toFace(corners[0]), toFace(corners[1])] : undefined,
+      expressive,
     );
     if (!res) return undefined;
     if (import.meta.env?.DEV) console.info(`[avatar] synthesized face: ${JSON.stringify(res.info)}`);
@@ -619,7 +755,8 @@ export class SynthFace {
     // Install: displacements back from the face frame to each mesh's own geometry space.
     const slots: SynthFace["slots"] = [];
     used.forEach((m, mi) => {
-      const targets = [res.upper[mi], res.lower[mi], res.mouth[mi]];
+      const extraNames = Object.keys(res.extra).filter((c) => res.extra[c][mi]);
+      const targets = [res.upper[mi], res.lower[mi], res.mouth[mi], ...extraNames.map((c) => res.extra[c][mi])];
       if (!targets.some(Boolean)) return;
       const g = m.geometry;
       const inv = new THREE.Matrix3().setFromMatrix4(toWorld.get(m)!).invert(); // world -> geometry (directions)
@@ -627,7 +764,7 @@ export class SynthFace {
       const rel = g.morphTargetsRelative || !g.morphAttributes.position?.length;
       if (!g.morphAttributes.position?.length) g.morphTargetsRelative = true;
       const list = (g.morphAttributes.position ??= []);
-      const slot: SynthFace["slots"][number] = { mesh: m };
+      const slot: SynthFace["slots"][number] = { mesh: m, extra: [] };
       const names = ["upper", "lower", "mouth"] as const;
       targets.forEach((d, ti) => {
         if (!d) return;
@@ -639,8 +776,9 @@ export class SynthFace {
           arr.set([v.x, v.y, v.z], i * 3);
         }
         const attr = new THREE.Float32BufferAttribute(arr, 3);
-        attr.name = `synth_${names[ti]}`;
-        slot[names[ti]] = list.length;
+        attr.name = `synth_${names[ti] ?? extraNames[ti - 3]}`;
+        if (ti < 3) slot[names[ti]] = list.length;
+        else slot.extra.push([extraNames[ti - 3], list.length]);
         list.push(attr);
         // other morph attributes (normals) must have the same count
         if (g.morphAttributes.normal) g.morphAttributes.normal.push(new THREE.Float32BufferAttribute(new Float32Array(pos.count * 3), 3));
@@ -650,7 +788,7 @@ export class SynthFace {
       for (const mat of mats) mat.needsUpdate = true;
       slots.push(slot);
     });
-    return new SynthFace(slots, res.info.eyes > 0, res.info.mouthWidth !== undefined);
+    return new SynthFace(slots, res.info.eyes > 0, res.info.mouthWidth !== undefined, Object.keys(res.extra));
   }
 
   /** Lid travel (fractions of the eye opening) for the eye channels; never more than closed. */
@@ -676,6 +814,7 @@ export class SynthFace {
       if (s.upper !== undefined) inf[s.upper] = upper;
       if (s.lower !== undefined) inf[s.lower] = lower;
       if (s.mouth !== undefined) inf[s.mouth] = open;
+      for (const [c, k] of s.extra) inf[k] = w[c] ?? 0;
     }
   }
 }

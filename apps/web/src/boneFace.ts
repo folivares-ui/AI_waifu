@@ -162,6 +162,14 @@ export class BoneFaceRig {
         if (this.synth?.hasMouth) this.channels.add("mouthOpen");
       }
     }
+    // Family 5: no face bones at all (the expressions were blendshapes lost in a conversion): eyelids and jaw
+    // from the mesh alone, when it has eye openings and the eye bones are known.
+    if (this.channels.size === 0) {
+      this.synth = SynthFace.build(vrm, undefined, true);
+      if (this.synth?.hasEyes) for (const c of ["blink", "squint", "eyeSmile", "eyeWide"] as const) this.channels.add(c);
+      if (this.synth?.hasMouth) this.channels.add("mouthOpen");
+      for (const c of this.synth?.extraChannels ?? []) if (c in CHANNELS) this.channels.add(c as Channel);
+    }
     this.driven = [...byNode.values()];
   }
 

@@ -9,6 +9,9 @@ import { MToonMaterial, VRMSpringBoneJoint, VRMSpringBoneManager, type VRM } fro
 
 const FLAT_SHADED = /face|eye|mayu|brow|lash|cheek|mouth|tooth|teeth|tongue/i; // parts that must not get shadows
 
+/** Brightness of converted materials' lit side (1 = texture x (key + ambient light), which overexposes). */
+const LIT = 0.78;
+
 /** Replaces PBR materials with anime-style toon materials. Returns how many were converted. */
 export function toonify(vrm: VRM): number {
   let converted = 0;
@@ -24,8 +27,10 @@ export function toonify(vrm: VRM): number {
         const flat = FLAT_SHADED.test(m.name);
         const toon = new MToonMaterial({
           ...(std.map ? { map: std.map, shadeMultiplyTexture: std.map } : {}), // shadows = the texture itself, tinted
-          color: std.color,
-          shadeColorFactor: flat ? new THREE.Color(1, 1, 1) : new THREE.Color(0.8, 0.74, 0.84),
+          // The scene's ambient light is added on top of the key light (both multiply the texture), which washes a
+          // converted model out: pale skin and white clothes burn to pure white. Lit = ~the painted colour instead.
+          color: std.color.clone().multiplyScalar(LIT),
+          shadeColorFactor: flat ? new THREE.Color(LIT, LIT, LIT) : new THREE.Color(0.8, 0.74, 0.84).multiplyScalar(LIT),
           shadingToonyFactor: 0.9,
           shadingShiftFactor: flat ? 0 : -0.05,
           giEqualizationFactor: 0.9,
@@ -62,7 +67,15 @@ export function hideHelperMeshes(vrm: VRM): string[] {
   for (const m of meshes) {
     const map = mapOf(m);
     const verts = m.geometry.getAttribute("position")?.count ?? 0;
-    const matName = (Array.isArray(m.material) ? m.material[0] : m.material).name;
+    const mat = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.MeshStandardMaterial;
+    const matName = mat.name;
+    // Fully transparent in the file (alpha 0): invisible in the original too (effects the game drives itself).
+    // Converting it to a toon material would lose that and show it as a solid white or black patch.
+    if (mat.transparent && mat.opacity <= 0.01) {
+      m.visible = false;
+      hidden.push(`${matName} (invisible)`);
+      continue;
+    }
     if (!map && textured >= meshes.length - 2 && verts < 500) {
       m.visible = false;
       hidden.push(`${matName} (untextured overlay)`);

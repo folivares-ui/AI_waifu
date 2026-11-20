@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fixVrm, guessHumanoid, readGlb, writeGlb } from "./vrmfix.js";
+import { fixVrm, guessHumanoid, modelHeight, readGlb, writeGlb } from "./vrmfix.js";
 
 /** A skeleton named like the converted model that failed to load (Sketchfab-style suffixes). */
 function skeleton() {
@@ -81,3 +81,116 @@ describe("repairing VRM files without a humanoid bone list", () => {
   });
 });
 
+
+/** A tiny humanoid (20 cm) whose bone names are unreadable, with a skinned box so it has a mesh. */
+function unnamedTiny() {
+  const nodes: Record<string, unknown>[] = [];
+  const add = (t: [number, number, number], parent?: number) => {
+    nodes.push({ name: "��_" + nodes.length, translation: t });
+    const i = nodes.length - 1;
+    if (parent !== undefined) ((nodes[parent].children as number[] | undefined) ?? (nodes[parent].children = [])).push(i);
+    return i;
+  };
+  // positions are relative to the parent, metres (a 20 cm figure facing +z)
+  const root = add([0, 0, 0]);
+  const hips = add([0, 0.1, 0], root);
+  const legs = (x: number) => {
+    const up = add([x, -0.005, 0], hips);
+    const knee = add([0, -0.045, 0], up);
+    const foot = add([0, -0.04, 0], knee);
+    add([0, -0.008, 0.01], foot); // toes, in front
+  };
+  legs(0.012);
+  legs(-0.012);
+  const s1 = add([0, 0.015, 0], hips);
+  const s2 = add([0, 0.015, 0], s1);
+  const neck = add([0, 0.03, 0], s2);
+  const head = add([0, 0.01, 0], neck);
+  add([0.004, 0.012, 0.004], head); // eyes: single mirrored bones
+  add([-0.004, 0.012, 0.004], head);
+  const hair = add([0.002, 0.03, 0], head);
+  add([0, 0.01, 0], hair);
+  const arm = (x: number) => {
+    const clav = add([x * 0.3, 0.02, 0], s2);
+    const up = add([x, 0, 0], clav);
+    const twist = add([x * 0.5, -0.012, 0], up); // a twist bone in the chain
+    const elbow = add([x * 0.5, -0.012, 0], twist);
+    const hand = add([x, -0.024, 0], elbow);
+    add([x * 0.3, 0, 0], up); // helper on the arm (single bone)
+    add([x * 0.3, 0, 0], elbow);
+    add([x * 0.3, 0, 0], elbow);
+    for (let f = 0; f < 4; f++) add([x * 0.2, 0, 0.002 * f], add([x * 0.3, 0, 0.002 * f], hand)); // fingers: chains
+  };
+  arm(0.02);
+  arm(-0.02);
+  const n = nodes.length;
+  const joints = Array.from({ length: n }, (_, i) => i);
+  // every joint moves a bit of the mesh: JOINTS_0 = joint i for vertex i, weight 1
+  const count = n;
+  const pos = Buffer.alloc(count * 12);
+  const jnt = Buffer.alloc(count * 4);
+  const wts = Buffer.alloc(count * 16);
+  for (let i = 0; i < count; i++) {
+    pos.writeFloatLE(0, i * 12);
+    jnt.writeUInt8(i, i * 4);
+    wts.writeFloatLE(1, i * 16);
+  }
+  const ibm = Buffer.alloc(16 * 4);
+  [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1].forEach((v, i) => ibm.writeFloatLE(v, i * 4));
+  const data = Buffer.concat([pos, jnt, wts, ibm]);
+  nodes.push({ name: "body", mesh: 0, skin: 0 });
+  const json = {
+    scenes: [{ nodes: [0, n] }],
+    nodes,
+    skins: [{ joints, inverseBindMatrices: 3 }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0, JOINTS_0: 1, WEIGHTS_0: 2 } }] }],
+    bufferViews: [
+      { byteOffset: 0, byteLength: pos.length },
+      { byteOffset: pos.length, byteLength: jnt.length },
+      { byteOffset: pos.length + jnt.length, byteLength: wts.length },
+      { byteOffset: pos.length + jnt.length + wts.length, byteLength: ibm.length },
+    ],
+    accessors: [
+      { bufferView: 0, componentType: 5126, count, type: "VEC3", min: [0, 0, 0], max: [0, 0, 0] },
+      { bufferView: 1, componentType: 5121, count, type: "VEC4" },
+      { bufferView: 2, componentType: 5126, count, type: "VEC4" },
+      { bufferView: 3, componentType: 5126, count: 1, type: "MAT4" },
+    ],
+    extensions: { VRMC_vrm: { specVersion: "1.0", humanoid: { humanBones: {} } } },
+  };
+  const header = Buffer.alloc(8);
+  header.writeUInt32LE(data.length, 0);
+  header.write("BIN\0", 4, "latin1");
+  return { glb: writeGlb(json, Buffer.concat([header, data])), json };
+}
+
+describe("models with unreadable bone names and a lost scale", () => {
+  it("recognises the bones from the skeleton's shape (twist bones and helpers are skipped)", () => {
+    const { glb } = unnamedTiny();
+    const r = fixVrm(glb)!;
+    const bones = readGlb(r.fixed).json.extensions!.VRMC_vrm!.humanoid!.humanBones!;
+    const node = (b: string) => bones[b]?.node;
+    expect(node("hips")).toBe(1);
+    expect(node("leftUpperLeg")).toBe(2); // +x side is her left (she faces +z)
+    expect(node("leftLowerLeg")).toBe(3);
+    expect(node("leftFoot")).toBe(4);
+    expect(node("rightUpperLeg")).toBe(6);
+    expect(node("spine")).toBe(10);
+    expect(node("head")).toBe(13);
+    expect(node("neck")).toBe(12);
+    expect([node("leftEye"), node("rightEye")]).toEqual([14, 15]);
+    // arm: clavicle, upper arm, (twist), elbow, hand
+    expect(node("leftShoulder")).toBe(18);
+    expect(node("leftUpperArm")).toBe(19);
+    expect(node("leftLowerArm")).toBe(21);
+    expect(node("leftHand")).toBe(22);
+  });
+  it("resizes a 20 cm model to a person's height and leaves normal ones alone", () => {
+    const { glb } = unnamedTiny();
+    const r = fixVrm(glb)!;
+    expect(r.scale).toBeGreaterThan(5);
+    const back = readGlb(r.fixed);
+    expect(modelHeight(back.json, back.bin)).toBeCloseTo(1.58, 2);
+    expect(fixVrm(r.fixed)).toBeUndefined(); // bones filled in and the right size: nothing left to do
+  });
+});
