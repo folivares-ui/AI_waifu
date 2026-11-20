@@ -35,6 +35,9 @@ export const CHANNELS = {
   browUp: [{ bones: BROW_ALL, mm: [0, 7, 0] }],
   browAngry: [{ bones: BROW_INNER, mm: [0, -7, 0] }, { bones: BROW_OUTER, mm: [0, 4, 0] }],
   browSad: [{ bones: BROW_INNER, mm: [0, 7, 0] }, { bones: BROW_OUTER, mm: [0, -4, 0] }],
+  // Annoyed look: inner brows pulled together towards the nose, and narrowed eyes (upper lid down, lower lid up).
+  browFurrow: [{ bones: /^Eyebrow_0[14]_L$/, mm: [-2.5, -1.5, 0] }, { bones: /^Eyebrow_0[14]_R$/, mm: [2.5, -1.5, 0] }],
+  squint: [{ bones: UPPER_LID, mm: [0, -9, 0] }, { bones: LOWER_LID, mm: [0, 4, 0] }],
   // Jaw drop graded from the centre of the lower lip to the corners, so the opening has a rounded bottom
   // (combined with mouthSmile it becomes the open "D" smile).
   mouthOpen: [
@@ -66,7 +69,8 @@ export const RIG_POSES: Record<Emotion, Weights> = {
   neutral: {},
   happy: { eyeSmile: 0.9, mouthSmile: 1, browUp: 0.3, earsPerk: 1 },
   sad: { browSad: 1, mouthFrown: 1, blink: 0.22, earsDroop: 1 },
-  angry: { browAngry: 1, mouthFrown: 0.7, blink: 0.12, earsBack: 1 },
+  // Annoyed/angry: furrowed brows pulled together, narrowed glaring eyes, mouth pressed into a frown.
+  angry: { browAngry: 1, browFurrow: 1, squint: 0.7, mouthFrown: 0.9, mouthNarrow: 0.45, earsBack: 1 },
   surprised: { eyeWide: 1, browUp: 1, mouthOpen: 0.3, mouthNarrow: 0.5, earsPerk: 1 },
   thinking: { browUp: 0.35, mouthNarrow: 0.6, earsDroop: 0.25 },
   shy: { eyeSmile: 0.45, mouthSmile: 0.5, browSad: 0.6, earsDroop: 0.7 },
@@ -216,12 +220,16 @@ export function geometryMoves(head: THREE.Object3D, nodes: THREE.Object3D[]): Ge
     // Eyebrows: the skin bone carries the brow. Inner = closest to the nose.
     const brows = find(new RegExp(`^${side} browskin [A-Z]$`)).sort((a, b) => Math.abs(pos(a).x) - Math.abs(pos(b).x));
     const unit = Math.max(3, Math.min(8, meanGap * 0.45)); // ~6 mm on a typical face
+    const inward = side === "L" ? -1 : 1; // towards the nose
     brows.forEach((o, i) => {
       const t = brows.length > 1 ? i / (brows.length - 1) : 0; // 0 inner .. 1 outer
       mm("browUp", o, 0, unit, 0);
       mm("browAngry", o, 0, unit * (-0.9 + 1.4 * t), 0);
       mm("browSad", o, 0, unit * (0.9 - 1.4 * t), 0);
+      mm("browFurrow", o, inward * unit * 0.45 * (1 - t), -unit * 0.25 * (1 - t), 0);
     });
+    upper.forEach((o, i) => mm("squint", o, 0, -0.42 * gaps[i], 0));
+    for (const o of lower) mm("squint", o, 0, 0.18 * meanGap, 0);
   }
 
   // Mouth: the outermost lip bones are the corners.
@@ -286,12 +294,16 @@ export function geometryMovesF(head: THREE.Object3D, nodes: THREE.Object3D[]): G
       put("eyeWide", bottom, 0, -0.05 * gap, 0);
       const unit = Math.max(3, Math.min(8, gap * 0.3));
       const brows = [1, 2, 3].map((i) => one(new RegExp(`^F ${side} EyeBrows${i}$`)));
+      const inward = side === "L" ? -1 : 1; // towards the nose
       brows.forEach((b, i) => {
         const t = i / 2; // 0 inner .. 1 outer
         put("browUp", b, 0, unit, 0);
         put("browAngry", b, 0, unit * (-0.9 + 1.4 * t), 0);
         put("browSad", b, 0, unit * (0.9 - 1.4 * t), 0);
+        put("browFurrow", b, inward * unit * 0.45 * (1 - t), -unit * 0.25 * (1 - t), 0);
       });
+      put("squint", top, 0, -0.38 * gap, 0);
+      put("squint", bottom, 0, 0.16 * gap, 0);
     }
     const corner = one(new RegExp(`^F ${side} MouthCorners$`));
     const out = side === "L" ? 1 : -1;

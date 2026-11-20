@@ -51,4 +51,12 @@ describe("face rig family 3 (F_L_EyelidTop...)", () => {
     expect(jaw.rot[0]).toBeGreaterThan(0.08);
     expect(jaw.rot[0]).toBeLessThan(0.15);
   });
+  it("annoyed look: inner brows pulled towards the nose and narrowed eyes", () => {
+    const { head, nodes } = face();
+    const moves = geometryMovesF(head, nodes);
+    const own = (ch: string, name: string) => (moves.find((m) => m.channel === ch && m.node.name.startsWith(name)) as { mm: number[] } | undefined)?.mm;
+    expect(own("browFurrow", "F_L_EyeBrows1")![0]).toBeLessThan(0); // left brow moves right, towards the nose
+    expect(own("squint", "F_L_EyelidTop")![1]).toBeLessThan(0);
+    expect(own("squint", "F_L_EyelidBottom")![1]).toBeGreaterThan(0);
+  });
 });
