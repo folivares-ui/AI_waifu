@@ -19,3 +19,20 @@ describe("converted models: helper meshes", () => {
     expect(hidden).toEqual(["fx (invisible)"]);
   });
 });
+
+describe("per-character brightness of converted models", () => {
+  it("darkens only the converted toon materials, and can be set again later", async () => {
+    const { toonify, setToonBrightness } = await import("./avatarFixups");
+    const scene = new THREE.Group();
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial({ color: 0xffffff, name: "skin" }));
+    scene.add(mesh);
+    const vrm = { scene } as unknown as VRM;
+    toonify(vrm);
+    const mat = mesh.material as unknown as { color: THREE.Color };
+    expect(mat.color.r).toBeCloseTo(1);
+    setToonBrightness(vrm, 0.78);
+    expect(mat.color.r).toBeCloseTo(0.78);
+    setToonBrightness(vrm, 1); // from the original colour, not compounded
+    expect(mat.color.r).toBeCloseTo(1);
+  });
+});

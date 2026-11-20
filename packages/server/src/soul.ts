@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { Trait } from "./growth.js";
-import { EMOTIONS, type MotionStyle, type NameConfig, type VoiceHints } from "@waifu/core";
+import { EMOTIONS, type LookStyle, type MotionStyle, type NameConfig, type VoiceHints } from "@waifu/core";
 
 /** Keeps motion values in a sane range (a typo in a soul file must not make her spin). */
 function clampMotion(m: MotionStyle): MotionStyle {
@@ -22,6 +22,8 @@ export interface Soul {
   growth?: Trait[];
   /** How lively her body is (see MotionStyle). */
   motion?: MotionStyle;
+  /** How her model is drawn (see LookStyle). */
+  look?: LookStyle;
 }
 
 export function loadSoul(path: string): Soul {
@@ -36,6 +38,7 @@ export function loadSoul(path: string): Soul {
     names: s.names?.aliases?.length ? s.names : { aliases: [s.name] },
     owner: s.owner,
     motion: s.motion && typeof s.motion === "object" ? clampMotion(s.motion) : undefined,
+    look: s.look && typeof s.look === "object" && typeof s.look.brightness === "number" && Number.isFinite(s.look.brightness) ? { brightness: Math.min(1.3, Math.max(0.4, s.look.brightness)) } : undefined,
     growth: Array.isArray(s.growth) ? s.growth.filter((t) => t && typeof t.id === "string" && typeof t.name === "string").slice(0, 6) : undefined,
   };
 }

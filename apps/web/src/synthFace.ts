@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { VRM } from "@pixiv/three-vrm";
+import { DrawnBrows } from "./drawnBrows";
 
 /**
  * Eyelids and mouth opening for models that have neither blendshapes nor eyelid/jaw bones (e.g. models converted
@@ -32,6 +33,8 @@ export interface FaceMorphs {
   mouth: (Float32Array | undefined)[];
   /** Eyebrow and mouth-shape channels (only with `expressive`): channel -> per mesh displacements. */
   extra: Record<string, (Float32Array | undefined)[]>;
+  /** The eyebrow pieces found (only with `expressive`): mesh index and its vertices. */
+  brows: { mesh: number; verts: number[] }[];
   info: { eyes: number; gap: number[]; mouthWidth?: number; moved: number };
 }
 
@@ -473,6 +476,7 @@ function eyebrows(
   found: { eye: Eye; face: number }[],
   eyes: V3[],
   put: (channel: string, mi: number, i: number, x: number, y: number, z: number) => void,
+  pieces: { mesh: number; verts: number[] }[],
 ): number {
   const midX = eyes.reduce((s, e) => s + e[0], 0) / eyes.length;
   let moved = 0;
@@ -497,6 +501,7 @@ function eyebrows(
         const inner = Math.min(Math.abs(mn[0] - midX), Math.abs(mx[0] - midX));
         const outer = Math.max(Math.abs(mn[0] - midX), Math.abs(mx[0] - midX));
         const inward = cx > midX ? -1 : 1; // towards the nose
+        pieces.push({ mesh: mi, verts: c });
         for (const i of c) {
           const t = Math.max(0, Math.min(1, (Math.abs(vtx(m, i)[0] - midX) - inner) / (outer - inner || 1))); // 0 inner .. 1 outer
           put("browUp", mi, i, 0, unit, 0);
@@ -584,7 +589,8 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
     arr[i * 3 + 1] += y;
     arr[i * 3 + 2] += z;
   };
-  if (expressive) moved += eyebrows(meshes, comps, found, eyes, put);
+  const brows: { mesh: number; verts: number[] }[] = [];
+  if (expressive) moved += eyebrows(meshes, comps, found, eyes, put, brows);
 
   let mouthWidth: number | undefined;
   const corners = mouthCorners ?? (eyes.length === 2 ? guessMouthCorners(meshes[found[0].face], eyes as [V3, V3]) : undefined);
@@ -658,7 +664,7 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
       }
     }
   }
-  return { upper, lower, mouth, extra, info: { eyes: found.length, gap: found.map((f) => f.eye.gmax), mouthWidth, moved } };
+  return { upper, lower, mouth, extra, brows, info: { eyes: found.length, gap: found.map((f) => f.eye.gmax), mouthWidth, moved } };
 }
 
 // ---------- three.js glue ----------
@@ -679,6 +685,8 @@ export class SynthFace {
   readonly hasMouth: boolean;
   /** Eyebrow / mouth-shape channels it built (faces with no bones at all). */
   readonly extraChannels: string[];
+  /** Eyebrows drawn anew (see drawnBrows.ts), when the model's own could be replaced. */
+  brows?: DrawnBrows;
 
   private constructor(slots: SynthFace["slots"], hasEyes: boolean, hasMouth: boolean, extraChannels: string[]) {
     this.slots = slots;
@@ -788,7 +796,19 @@ export class SynthFace {
       for (const mat of mats) mat.needsUpdate = true;
       slots.push(slot);
     });
-    return new SynthFace(slots, res.info.eyes > 0, res.info.mouthWidth !== undefined, Object.keys(res.extra));
+    const face = new SynthFace(slots, res.info.eyes > 0, res.info.mouthWidth !== undefined, Object.keys(res.extra));
+    // The model's own eyebrows, when they are meshes of their own: drawn anew over the hair (see drawnBrows.ts).
+    if (expressive && res.brows.length) {
+      const byMesh = new Map<number, number>();
+      for (const b of res.brows) byMesh.set(b.mesh, (byMesh.get(b.mesh) ?? 0) + b.verts.length);
+      const whole = [...byMesh].every(([mi, n]) => n === inputs[mi].pos.length / 3);
+      if (whole) {
+        const pieces = res.brows.map((b) => ({ mesh: used[b.mesh], points: b.verts.map((i) => [inputs[b.mesh].pos[i * 3], inputs[b.mesh].pos[i * 3 + 1], inputs[b.mesh].pos[i * 3 + 2]] as V3), verts: b.verts }));
+        face.brows = DrawnBrows.build(head, pieces, res.info.gap[0] ?? 0.015);
+        if (face.brows) for (const mi of byMesh.keys()) for (const mat of [used[mi].material].flat()) mat.visible = false;
+      }
+    }
+    return face;
   }
 
   /** Lid travel (fractions of the eye opening) for the eye channels; never more than closed. */
@@ -816,5 +836,6 @@ export class SynthFace {
       if (s.mouth !== undefined) inf[s.mouth] = open;
       for (const [c, k] of s.extra) inf[k] = w[c] ?? 0;
     }
+    this.brows?.apply(w);
   }
 }

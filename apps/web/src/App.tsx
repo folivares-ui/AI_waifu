@@ -387,7 +387,7 @@ export function App() {
 
   return (
     <div className="app">
-      <AvatarStage key={soul.name} character={soul.name} motion={soul.motion} hiddenParts={hiddenParts} onParts={setModelParts} emotion={emotion} speaking={speaking} listening={listening} getLevel={getLevel} onTouch={(r) => soul.sendTouch(r)} />
+      <AvatarStage key={soul.name} character={soul.name} motion={soul.motion} look={soul.look} hiddenParts={hiddenParts} onParts={setModelParts} emotion={emotion} speaking={speaking} listening={listening} getLevel={getLevel} onTouch={(r) => soul.sendTouch(r)} />
       <div className="veil veil-top" aria-hidden="true" />
       <div className="veil veil-bottom" aria-hidden="true" />
 

@@ -28,6 +28,8 @@ describe("characters", () => {
       ["rebecca", "Rebecca", true],
     ]);
     expect(c.load("nicole").owner?.honorific).toBe("Proxy");
+    expect(c.load("nicole").look).toEqual({ brightness: 0.78 }); // only her model is drawn darker
+    expect(c.load("rebecca").look).toBeUndefined();
     expect(c.load("midnight").names?.aliases).toEqual(["Midnight", "Nemuri", "Kayama"]);
     const rebecca = c.load("rebecca");
     expect(rebecca.motion).toEqual({ energy: 1.4, tempo: 1.12, bounce: 0.45, fidget: 0.55 });

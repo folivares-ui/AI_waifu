@@ -2,8 +2,8 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
-import type { Emotion, MotionStyle, TouchRegion } from "@waifu/core";
-import { addSpringChains, faceFraming, fullFraming, hideHelperMeshes, toonify } from "./avatarFixups";
+import type { Emotion, LookStyle, MotionStyle, TouchRegion } from "@waifu/core";
+import { addSpringChains, faceFraming, fullFraming, hideHelperMeshes, setToonBrightness, toonify } from "./avatarFixups";
 import { collectParts } from "./modelParts";
 import { BODY_BONES, bodyPose } from "./bodyMotion";
 import { solveArmPoses, type ArmSolutions } from "./armIK";
@@ -26,6 +26,8 @@ export interface AvatarProps {
   onParts?: (parts: string[]) => void;
   /** How lively this character's body is (soul "motion"). */
   motion?: MotionStyle;
+  /** How her model is drawn (soul "look"). */
+  look?: LookStyle;
 }
 
 /** Floating hearts / sweat drops next to the cursor (rendered by AvatarStage). */
@@ -64,6 +66,11 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
   };
   // Hide/show parts whenever the choice changes.
   useEffect(applyHidden, [props.hiddenParts]);
+  // Per-character brightness (converted models), also when it arrives after the model.
+  const model = useRef<VRM | undefined>(undefined);
+  useEffect(() => {
+    if (model.current) setToonBrightness(model.current, props.look?.brightness ?? 1);
+  }, [props.look?.brightness]);
 
   useEffect(() => {
     const el = host.current!;
@@ -157,6 +164,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         applyHidden();
         live.current.onParts?.([...parts.current.keys()]);
         const tooned = toonify(v);
+        setToonBrightness(v, live.current.look?.brightness ?? 1);
         rig = BoneFaceRig.detect(v); // must run in the rest pose
         armLift = measureArmLift(v); // A-pose models: lift the arms back to the T-pose the poses are written for
         torso = TorsoGuard.measure(v); // her real body shape, so the arms never go through it
@@ -183,6 +191,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
           console.info(`[avatar] converted model: ${tooned} materials made toon, hidden: [${hidden.join(", ")}], face rig: ${rig ? [...rig.channels].join(",") : "none"}, hair springs: ${springs ? springs.joints.size : 0}`);
         }
         vrm = v;
+        model.current = v;
         if (import.meta.env.DEV) Object.assign(window, { __vrm: v, __THREE: THREE, __camera: camera, __rig: rig }); // for rig experiments
         // Relaxed pose instead of the default T-pose.
         const bone = (n: string) => v.humanoid.getNormalizedBoneNode(n as never);

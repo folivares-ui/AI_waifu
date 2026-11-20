@@ -135,7 +135,7 @@ export class Session {
   }
 
   hello() {
-    this.send({ type: "ready", soul: { name: this.soul.name, voice: this.soul.voice, names: this.soul.names, motion: this.soul.motion }, caps: this.caps });
+    this.send({ type: "ready", soul: { name: this.soul.name, voice: this.soul.voice, names: this.soul.names, motion: this.soul.motion, look: this.soul.look }, caps: this.caps });
   }
 
   handle(msg: ClientMessage) {

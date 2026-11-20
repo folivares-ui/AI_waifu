@@ -9,9 +9,6 @@ import { MToonMaterial, VRMSpringBoneJoint, VRMSpringBoneManager, type VRM } fro
 
 const FLAT_SHADED = /face|eye|mayu|brow|lash|cheek|mouth|tooth|teeth|tongue/i; // parts that must not get shadows
 
-/** Brightness of converted materials' lit side (1 = texture x (key + ambient light), which overexposes). */
-const LIT = 0.78;
-
 /** Replaces PBR materials with anime-style toon materials. Returns how many were converted. */
 export function toonify(vrm: VRM): number {
   let converted = 0;
@@ -27,10 +24,8 @@ export function toonify(vrm: VRM): number {
         const flat = FLAT_SHADED.test(m.name);
         const toon = new MToonMaterial({
           ...(std.map ? { map: std.map, shadeMultiplyTexture: std.map } : {}), // shadows = the texture itself, tinted
-          // The scene's ambient light is added on top of the key light (both multiply the texture), which washes a
-          // converted model out: pale skin and white clothes burn to pure white. Lit = ~the painted colour instead.
-          color: std.color.clone().multiplyScalar(LIT),
-          shadeColorFactor: flat ? new THREE.Color(LIT, LIT, LIT) : new THREE.Color(0.8, 0.74, 0.84).multiplyScalar(LIT),
+          color: std.color,
+          shadeColorFactor: flat ? new THREE.Color(1, 1, 1) : new THREE.Color(0.8, 0.74, 0.84),
           shadingToonyFactor: 0.9,
           shadingShiftFactor: flat ? 0 : -0.05,
           giEqualizationFactor: 0.9,
@@ -39,6 +34,7 @@ export function toonify(vrm: VRM): number {
           side: std.side,
         });
         toon.name = m.name;
+        toon.userData.toonBase = { color: toon.color.clone(), shade: toon.shadeColorFactor.clone() };
         out = toon;
         cache.set(m, out);
         converted++;
@@ -49,6 +45,23 @@ export function toonify(vrm: VRM): number {
   });
   for (const old of cache.keys()) old.dispose();
   return converted;
+}
+
+/**
+ * Brightness of the converted (toonify) materials, per character (soul "look.brightness"). The scene's ambient
+ * light adds to the key light, so pale models can burn out to pure white: below 1 they are drawn darker.
+ */
+export function setToonBrightness(vrm: VRM, k: number) {
+  vrm.scene.traverse((o) => {
+    const mats = (o as THREE.Mesh).isMesh ? ((o as THREE.Mesh).material as THREE.Material | THREE.Material[]) : [];
+    for (const m of Array.isArray(mats) ? mats : [mats]) {
+      const base = m.userData.toonBase as { color: THREE.Color; shade: THREE.Color } | undefined;
+      if (!base) continue;
+      const t = m as MToonMaterial;
+      t.color.copy(base.color).multiplyScalar(k);
+      t.shadeColorFactor.copy(base.shade).multiplyScalar(k);
+    }
+  });
 }
 
 /**

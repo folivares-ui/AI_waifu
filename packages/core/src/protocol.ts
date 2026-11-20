@@ -37,7 +37,7 @@ export type ClientMessage =
   | { type: "hello" };
 
 export type ServerMessage =
-  | { type: "ready"; soul: { name: string; voice: VoiceHints; names?: import("./names.js").NameConfig; motion?: MotionStyle }; caps: Capabilities }
+  | { type: "ready"; soul: { name: string; voice: VoiceHints; names?: import("./names.js").NameConfig; motion?: MotionStyle; look?: LookStyle }; caps: Capabilities }
   /** Streaming token (for text display). */
   | { type: "token"; turnId: number; text: string }
   /**
@@ -82,6 +82,11 @@ export interface Capabilities {
  * bounce: 0..1 rocking on the knees even when idle; fidget: 0..1 small spontaneous moves (hand on hip,
  * shoulder roll, torso twist...).
  */
+/** How a character's model is drawn. brightness: lit-side brightness of models converted from PBR (1 = as is). */
+export interface LookStyle {
+  brightness?: number;
+}
+
 export interface MotionStyle {
   energy?: number;
   tempo?: number;

@@ -68,6 +68,9 @@
       "down": "esta un poco mas distante, mas de negocios"
     }
   ],
+  "look": {
+    "brightness": 0.78
+  },
   "motion": {
     "energy": 1.15,
     "tempo": 1.0,
