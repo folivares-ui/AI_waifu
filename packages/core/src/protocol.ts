@@ -37,7 +37,7 @@ export type ClientMessage =
   | { type: "hello" };
 
 export type ServerMessage =
-  | { type: "ready"; soul: { name: string; voice: VoiceHints; names?: import("./names.js").NameConfig }; caps: Capabilities }
+  | { type: "ready"; soul: { name: string; voice: VoiceHints; names?: import("./names.js").NameConfig; motion?: MotionStyle }; caps: Capabilities }
   /** Streaming token (for text display). */
   | { type: "token"; turnId: number; text: string }
   /**
@@ -75,6 +75,18 @@ export interface Capabilities {
    * recognition (audio goes to Google/Microsoft) or online browser voices (text goes to them).
    */
   privateMode?: boolean;
+}
+
+/**
+ * How lively a character's body is (1 = the default, calm). energy: size of sways and gestures; tempo: speed;
+ * bounce: 0..1 rocking on the knees even when idle; fidget: 0..1 small spontaneous moves (hand on hip,
+ * shoulder roll, torso twist...).
+ */
+export interface MotionStyle {
+  energy?: number;
+  tempo?: number;
+  bounce?: number;
+  fidget?: number;
 }
 
 export interface VoiceHints {

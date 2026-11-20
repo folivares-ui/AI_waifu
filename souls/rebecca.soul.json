@@ -63,5 +63,11 @@
       "up": "te considera mas parte de su equipo",
       "down": "esta un poco mas distante"
     }
-  ]
+  ],
+  "motion": {
+    "energy": 1.7,
+    "tempo": 1.35,
+    "bounce": 0.6,
+    "fidget": 0.75
+  }
 }

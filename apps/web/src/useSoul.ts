@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PROACTIVE_TURN_BASE, type Capabilities, type ClientMessage, type Emotion, type ScreenImage, type ServerMessage, type VoiceHints, type NameConfig, type TouchRegion, type Gesture } from "@waifu/core";
+import { PROACTIVE_TURN_BASE, type Capabilities, type ClientMessage, type Emotion, type ScreenImage, type ServerMessage, type VoiceHints, type MotionStyle, type NameConfig, type TouchRegion, type Gesture } from "@waifu/core";
 import { b64ToBuffer, type Clip } from "./player";
 import { serverBase } from "./net";
 import { cleanTags } from "./dialog";
@@ -34,6 +34,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion,
   const [connected, setConnected] = useState(false);
   const [name, setName] = useState("...");
   const [voice, setVoice] = useState<VoiceHints>({ lang: "es-ES", pitch: 1, rate: 1 });
+  const [motion, setMotion] = useState<MotionStyle>();
   const [names, setNames] = useState<NameConfig>();
   const [caps, setCaps] = useState<Capabilities>({ tts: false, stt: false, vision: false });
   const [lines, setLines] = useState<ChatLine[]>([]);
@@ -90,6 +91,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion,
             return m.soul.name;
           });
           setVoice(m.soul.voice);
+          setMotion(m.soul.motion);
           setNames(m.soul.names);
           setCaps(m.caps);
         } else if (m.type === "token") {
@@ -157,6 +159,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion,
     name,
     names,
     voice,
+    motion,
     caps,
     toolStatus,
     lines,

@@ -42,4 +42,21 @@ describe("body language", () => {
     const noCross = at(0, { emotion: "angry", arms: { hips: arms.hips } });
     expect(noCross.leftUpperArm![1]).toBeCloseTo(-0.6, 1); // falls back to hands on the hips
   });
+  it("a lively character (Rebecca's style) moves more, faster, bounces and fidgets", () => {
+    const lively = { energy: 1.7, tempo: 1.35, bounce: 0.6, fidget: 0.75 };
+    const range = (style: typeof lively | undefined, pick: (p: ReturnType<typeof at>) => number) => {
+      const v = Array.from({ length: 300 }, (_, i) => pick(at(i * 0.1, { style })));
+      return Math.max(...v) - Math.min(...v);
+    };
+    const arm = (p: ReturnType<typeof at>) => p.leftUpperArm![2];
+    const knee = (p: ReturnType<typeof at>) => p.leftLowerLeg![0];
+    const twist = (p: ReturnType<typeof at>) => p.spine![1];
+    expect(range(lively, arm)).toBeGreaterThan(1.5 * range(undefined, arm));
+    expect(range(lively, knee)).toBeGreaterThan(range(undefined, knee));
+    expect(range(lively, twist)).toBeGreaterThan(0.05);
+    expect(range(undefined, twist)).toBeLessThan(0.05);
+    // fidgets: at some point a hand goes to the hip or the shoulders shrug, which the calm style never does
+    const shrug = (p: ReturnType<typeof at>) => p.leftShoulder![2];
+    expect(range(lively, shrug)).toBeGreaterThan(2 * range(undefined, shrug));
+  });
 });

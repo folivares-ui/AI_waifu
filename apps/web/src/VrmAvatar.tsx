@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
-import type { Emotion, TouchRegion } from "@waifu/core";
+import type { Emotion, MotionStyle, TouchRegion } from "@waifu/core";
 import { addSpringChains, faceFraming, fullFraming, hideHelperMeshes, toonify } from "./avatarFixups";
 import { collectParts } from "./modelParts";
 import { BODY_BONES, bodyPose } from "./bodyMotion";
@@ -22,6 +22,8 @@ export interface AvatarProps {
   hiddenParts?: string[];
   /** Called once the model is loaded, with the names of its parts. */
   onParts?: (parts: string[]) => void;
+  /** How lively this character's body is (soul "motion"). */
+  motion?: MotionStyle;
 }
 
 /** Floating hearts / sweat drops next to the cursor (rendered by AvatarStage). */
@@ -289,7 +291,8 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
       gaze.position.y = lerp(gaze.position.y, lookY, dt * 4);
       const head = vrm.humanoid.getNormalizedBoneNode("head");
       if (head) {
-        const nod = p.speaking ? Math.sin(t * 3.2) * 0.025 : 0;
+        const energy = p.motion?.energy ?? 1;
+        const nod = p.speaking ? Math.sin(t * 3.2 * (p.motion?.tempo ?? 1)) * 0.025 * energy : 0;
         const k = re && reaction ? env : 0;
         const side = reaction?.side ?? 0;
         // VRM 0.x normalized bones are mirrored (see the arm pose), so the roll towards the hand flips with it.
@@ -305,7 +308,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
       // VRM 0.x normalized bones are mirrored (x and z flip); poses are written in VRM 1.0 convention.
       const armK = vrm.meta.metaVersion === "0" ? -1 : 1;
       const devBody = import.meta.env.DEV ? (window as unknown as { __bodyEmotion?: Emotion; __bodySpeaking?: boolean }) : undefined;
-      const body = bodyPose({ t, emotion: devBody?.__bodyEmotion ?? p.emotion, speaking: devBody?.__bodySpeaking ?? p.speaking, level: voiceLevel, listening: p.listening, arms: armPoses });
+      const body = bodyPose({ t, emotion: devBody?.__bodyEmotion ?? p.emotion, speaking: devBody?.__bodySpeaking ?? p.speaking, level: voiceLevel, listening: p.listening, arms: armPoses, style: p.motion });
       const follow = Math.min(1, dt * 4.5); // ~0.3 s to settle into a new pose
       for (const name of BODY_BONES) {
         const e = body[name];
@@ -329,11 +332,14 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
       if (spine) {
         // steps back when shy; leans in a little while listening
         spine.rotation.x = lerp(spine.rotation.x, Math.sin(t * 1.5) * 0.012 - 0.16 * shrinkK + (body.spine?.[0] ?? 0) * armK, dt * 6);
-        spine.rotation.y = lerp(spine.rotation.y, 0.32 * (reaction?.side ?? 1) * shrinkK, dt * 5); // turns away
+        spine.rotation.y = lerp(spine.rotation.y, 0.32 * (reaction?.side ?? 1) * shrinkK + (body.spine?.[1] ?? 0), dt * 5); // turns away / twists
         spine.rotation.z = lerp(spine.rotation.z, (body.spine?.[2] ?? 0) * armK, follow); // stays upright over the shifting hips
       }
       const chest = vrm.humanoid.getNormalizedBoneNode("chest");
-      if (chest) chest.rotation.x = lerp(chest.rotation.x, Math.sin(t * 1.5 + 0.4) * 0.01 + (body.chest?.[0] ?? 0) * armK, follow);
+      if (chest) {
+        chest.rotation.x = lerp(chest.rotation.x, Math.sin(t * 1.5 + 0.4) * 0.01 + (body.chest?.[0] ?? 0) * armK, follow);
+        chest.rotation.z = lerp(chest.rotation.z, (body.chest?.[2] ?? 0) * armK, follow);
+      }
 
       vrm.update(dt);
       springs?.update(dt);

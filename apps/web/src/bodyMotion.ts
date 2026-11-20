@@ -1,4 +1,4 @@
-import type { Emotion } from "@waifu/core";
+import type { Emotion, MotionStyle } from "@waifu/core";
 import type { ArmSolution, ArmSolutions } from "./armIK";
 
 /**
@@ -55,6 +55,8 @@ export interface BodyState {
   listening: boolean;
   /** Arm poses solved for this model (armIK.ts); the fixed table is used when absent. */
   arms?: ArmSolutions;
+  /** How lively this character is (soul file "motion"); calm defaults when absent. */
+  style?: MotionStyle;
 }
 
 /** Mood poses with the hands placed for THIS model (on the hips, at the chin...). */
@@ -96,17 +98,23 @@ const add = (a: Euler3 | undefined, b: Euler3): Euler3 => (a ? [a[0] + b[0], a[1
 /** Target pose for this instant: mood pose + breathing/idle sway + weight shift + talking gestures. */
 export function bodyPose(s: BodyState): BodyPose {
   const pose: BodyPose = { ...(calibrated(s.emotion, s.arms) ?? EMOTION_POSES[s.emotion]) };
-  const { t } = s;
+  const energy = s.style?.energy ?? 1;
+  const bounceAmt = s.style?.bounce ?? 0;
+  const fidgetAmt = s.style?.fidget ?? 0;
+  const t = s.t * (s.style?.tempo ?? 1); // a lively character moves faster
   const breath = Math.sin(t * 1.5);
 
-  // Idle: arms sway a little with the breath, never perfectly still.
-  const sway = 0.035 * Math.sin(t * 0.8) + 0.015 * breath;
-  pose.leftUpperArm = add(pose.leftUpperArm, [0.03 * Math.sin(t * 0.7), 0, sway]);
-  pose.rightUpperArm = add(pose.rightUpperArm, [0.03 * Math.sin(t * 0.7 + 1.3), 0, -sway]);
-  pose.leftLowerArm = add(pose.leftLowerArm, [0, -0.05 * (1 + Math.sin(t * 0.9)), 0]);
-  pose.rightLowerArm = add(pose.rightLowerArm, [0, 0.05 * (1 + Math.sin(t * 0.9 + 0.8)), 0]);
-  pose.leftShoulder = add(pose.leftShoulder, [0, 0, 0.02 * breath]);
-  pose.rightShoulder = add(pose.rightShoulder, [0, 0, -0.02 * breath]);
+  // Idle: arms sway a little with the breath, never perfectly still (wider for energetic characters).
+  const sway = (0.035 * Math.sin(t * 0.8) + 0.015 * breath) * energy;
+  pose.leftUpperArm = add(pose.leftUpperArm, [0.03 * energy * Math.sin(t * 0.7), 0, sway]);
+  pose.rightUpperArm = add(pose.rightUpperArm, [0.03 * energy * Math.sin(t * 0.7 + 1.3), 0, -sway]);
+  pose.leftLowerArm = add(pose.leftLowerArm, [0, -0.05 * energy * (1 + Math.sin(t * 0.9)), 0]);
+  pose.rightLowerArm = add(pose.rightLowerArm, [0, 0.05 * energy * (1 + Math.sin(t * 0.9 + 0.8)), 0]);
+  pose.leftShoulder = add(pose.leftShoulder, [0, 0, 0.02 * energy * breath]);
+  pose.rightShoulder = add(pose.rightShoulder, [0, 0, -0.02 * energy * breath]);
+  // The torso is alive too: a slow twist and side sway (more with energy).
+  pose.spine = add(pose.spine, [0, 0.025 * (energy - 0.6) * Math.sin(t * 0.6), 0]);
+  pose.chest = add(pose.chest, [0, 0, 0.012 * (energy - 0.6) * Math.sin(t * 0.75 + 0.5)]);
 
   // Weight shift every few seconds: hips tilt, the free leg's knee bends a little.
   const shift = Math.sin(t * 0.42) * 0.5 + Math.sin(t * 0.17) * 0.5; // -1..1, slow and irregular
@@ -119,13 +127,42 @@ export function bodyPose(s: BodyState): BodyPose {
   pose.rightUpperLeg = [-0.07 * freeR, 0, -0.035 * shift];
   pose.rightLowerLeg = [0.16 * freeR, 0, 0];
 
-  // Happy: a small bounce in the knees.
-  if (s.emotion === "happy") {
-    const b = 0.5 + 0.5 * Math.sin(t * 4.2);
+  // Bounce in the knees: when happy, and always for restless characters (bounce > 0).
+  const bounce = s.emotion === "happy" ? Math.max(1, bounceAmt * 1.3) : bounceAmt;
+  if (bounce > 0) {
+    const b = bounce * (0.5 + 0.5 * Math.sin(t * 4.2));
     pose.leftUpperLeg = add(pose.leftUpperLeg, [-0.04 * b, 0, 0]);
     pose.rightUpperLeg = add(pose.rightUpperLeg, [-0.04 * b, 0, 0]);
     pose.leftLowerLeg = add(pose.leftLowerLeg, [0.08 * b, 0, 0]);
     pose.rightLowerLeg = add(pose.rightLowerLeg, [0.08 * b, 0, 0]);
+  }
+
+  // Fidgeting (restless characters): every few seconds one small spontaneous move, eased in and out.
+  if (fidgetAmt > 0 && !s.speaking && s.emotion !== "angry" && s.emotion !== "thinking") {
+    const slot = Math.floor(t / 3.2);
+    const phase = (t / 3.2) % 1;
+    const k = fidgetAmt * Math.sin(Math.PI * Math.min(1, phase * 1.25)) ** 2; // 0 -> 1 -> 0 within the slot
+    const move = Math.floor(rnd(slot + 77) * 5);
+    if (move === 0) {
+      // hand on the hip (left)
+      pose.leftUpperArm = add(pose.leftUpperArm, [0.25 * k, 0, 0.35 * k]);
+      pose.leftLowerArm = add(pose.leftLowerArm, [0, -1.1 * k, 0]);
+    } else if (move === 1) {
+      // shoulder roll / shrug
+      pose.leftShoulder = add(pose.leftShoulder, [0, 0, 0.12 * k]);
+      pose.rightShoulder = add(pose.rightShoulder, [0, 0, -0.12 * k]);
+    } else if (move === 2) {
+      // torso twist to one side
+      pose.spine = add(pose.spine, [0, 0.12 * k * (rnd(slot) > 0.5 ? 1 : -1), 0]);
+    } else if (move === 3) {
+      // arms swing forward and back, like shaking off energy
+      pose.leftUpperArm = add(pose.leftUpperArm, [-0.25 * k * Math.sin(t * 6), 0, 0]);
+      pose.rightUpperArm = add(pose.rightUpperArm, [0.25 * k * Math.sin(t * 6), 0, 0]);
+    } else {
+      // weight on one leg, hip popped
+      pose.hips = add(pose.hips, [0, 0, 0.06 * k]);
+      pose.spine = add(pose.spine, [0, 0, -0.06 * k]);
+    }
   }
 
   // Listening: a slight lean towards you.
@@ -135,7 +172,7 @@ export function bodyPose(s: BodyState): BodyPose {
   if (s.speaking && s.emotion !== "thinking") {
     const slot = Math.floor(t / 1.4);
     const pick = rnd(slot);
-    const beat = Math.min(1, 0.35 + s.level * 1.4) * (0.75 + 0.25 * Math.sin(t * 7));
+    const beat = Math.min(1, 0.35 + s.level * 1.4) * (0.75 + 0.25 * Math.sin(t * 7)) * Math.min(1.6, energy);
     const left = pick < 0.45 || pick > 0.8;
     const right = pick >= 0.45;
     const g = (k: number): [Euler3, Euler3] => [[-0.32 * k, 0, 0.18 * k], [0, -0.75 * k, 0]];
