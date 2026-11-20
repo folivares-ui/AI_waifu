@@ -34,7 +34,7 @@ export interface BodyShape {
   frontAt?(heightCm: number): number | undefined;
 }
 
-export function solveArmPoses(vrm: VRM, body?: BodyShape): ArmSolutions {
+export function solveArmPoses(vrm: VRM, body?: BodyShape, lift = 0): ArmSolutions {
   const H = vrm.humanoid;
   const k = vrm.meta.metaVersion === "0" ? -1 : 1;
   const N = (n: string) => H.getNormalizedBoneNode(n as never);
@@ -47,7 +47,7 @@ export function solveArmPoses(vrm: VRM, body?: BodyShape): ArmSolutions {
 
   const W = (n: string) => raw(n)!.getWorldPosition(new THREE.Vector3());
   const setArm = (u: Euler3, l: number) => {
-    N("leftUpperArm")!.rotation.set(u[0] * k, u[1], u[2] * k);
+    N("leftUpperArm")!.rotation.set(u[0] * k, u[1], u[2] * k + lift); // lift: A-pose models (restPose.ts)
     N("leftLowerArm")!.rotation.set(0, l, 0);
   };
   const measure = () => {

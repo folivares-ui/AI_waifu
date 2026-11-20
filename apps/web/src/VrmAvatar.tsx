@@ -8,6 +8,7 @@ import { collectParts } from "./modelParts";
 import { BODY_BONES, bodyPose } from "./bodyMotion";
 import { solveArmPoses, type ArmSolutions } from "./armIK";
 import { TorsoGuard } from "./torsoGuard";
+import { measureArmLift } from "./restPose";
 import { BoneFaceRig, CHANNEL_NAMES, RIG_POSES, type Channel } from "./boneFace";
 import { REACTIONS, StrokeTracker, TouchMap, envelope } from "./petting";
 
@@ -89,7 +90,11 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
     let rig: BoneFaceRig | undefined;
     let armPoses: ArmSolutions = {};
     let torso: TorsoGuard | undefined;
+    let armLift = { left: 0, right: 0 };
+    /** Extra outward opening of the hanging arms per mood, measured on her body at load. */
+    const clearance: Partial<Record<Emotion, { left: number; right: number }>> = {};
     let voiceLevelSmooth = 0;
+    const poseState = new Map<string, [number, number, number]>();
     let springs: ReturnType<typeof addSpringChains>;
     const rigCur = Object.fromEntries(CHANNEL_NAMES.map((n) => [n, 0])) as Record<Channel, number>;
     let nextTwitch = 3;
@@ -153,8 +158,24 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         live.current.onParts?.([...parts.current.keys()]);
         const tooned = toonify(v);
         rig = BoneFaceRig.detect(v); // must run in the rest pose
+        armLift = measureArmLift(v); // A-pose models: lift the arms back to the T-pose the poses are written for
         torso = TorsoGuard.measure(v); // her real body shape, so the arms never go through it
-        armPoses = solveArmPoses(v, torso); // hands on the hips, at the chin... for her proportions, outside her body
+        armPoses = solveArmPoses(v, torso, armLift.left); // hands on the hips, at the chin... for her proportions, outside her body
+        if (import.meta.env.DEV) console.info(`[avatar] arm lift (A-pose correction): ${JSON.stringify(armLift)}`);
+        // How far the hanging-arm poses must open so the arms clear her body (wide hips, bulky clothes...).
+        if (torso) {
+          const kk = v.meta.metaVersion === "0" ? -1 : 1;
+          for (const emo of ["neutral", "happy", "sad"] as Emotion[]) {
+            const pose0 = bodyPose({ t: 0, emotion: emo, speaking: false, level: 0, listening: false, arms: armPoses });
+            for (const name of BODY_BONES) {
+              const e = pose0[name];
+              const b = v.humanoid.getNormalizedBoneNode(name as never);
+              if (e && b && name !== "spine" && name !== "chest") b.rotation.set(e[0] * kk, e[1], e[2] * kk + (name === "leftUpperArm" ? armLift.left : name === "rightUpperArm" ? armLift.right : 0));
+            }
+            clearance[emo] = { left: torso.need("left", kk, 1.05), right: torso.need("right", -kk, 1.05) };
+          }
+          if (import.meta.env.DEV) console.info(`[avatar] arm clearance: ${JSON.stringify(clearance)}`);
+        }
         if (import.meta.env.DEV) console.info(`[avatar] arm poses solved: ${Object.keys(armPoses).join(", ") || "none"}`);
         touchMap = new TouchMap(v);
         springs = addSpringChains(v);
@@ -313,22 +334,35 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
       // VRM 0.x normalized bones are mirrored (x and z flip); poses are written in VRM 1.0 convention.
       const armK = vrm.meta.metaVersion === "0" ? -1 : 1;
       const devBody = import.meta.env.DEV ? (window as unknown as { __bodyEmotion?: Emotion; __bodySpeaking?: boolean }) : undefined;
-      const body = bodyPose({ t, emotion: devBody?.__bodyEmotion ?? p.emotion, speaking: devBody?.__bodySpeaking ?? p.speaking, level: voiceLevel, listening: p.listening, arms: armPoses, style: (import.meta.env.DEV ? (window as unknown as { __bodyStyle?: MotionStyle }).__bodyStyle : undefined) ?? p.motion });
+      const bodyEmotion = devBody?.__bodyEmotion ?? p.emotion;
+      const body = bodyPose({ t, emotion: bodyEmotion, speaking: devBody?.__bodySpeaking ?? p.speaking, level: voiceLevel, listening: p.listening, arms: armPoses, style: (import.meta.env.DEV ? (window as unknown as { __bodyStyle?: MotionStyle }).__bodyStyle : undefined) ?? p.motion });
       const follow = Math.min(1, dt * 4.5); // ~0.3 s to settle into a new pose
       for (const name of BODY_BONES) {
         const e = body[name];
         const b = vrm.humanoid.getNormalizedBoneNode(name as never);
         if (!e || !b || name === "spine" || name === "chest") continue;
-        b.rotation.x = lerp(b.rotation.x, e[0] * armK, follow);
-        b.rotation.y = lerp(b.rotation.y, e[1], follow);
-        b.rotation.z = lerp(b.rotation.z, e[2] * armK, follow);
+        // Smoothly towards the target, and never faster than a relaxed human joint (no vibration, whatever
+        // the source: a lively style, a jumpy voice level, a pose change).
+        // The smoothed pose is kept apart from the bone, so later corrections (torso guard, wave) never feed
+        // back into it frame after frame.
+        const maxStep = dt * 2.2;
+        const step = (cur: number, to: number) => cur + Math.max(-maxStep, Math.min(maxStep, (to - cur) * follow));
+        const st = poseState.get(name) ?? [b.rotation.x, b.rotation.y, b.rotation.z];
+        const open = clearance[bodyEmotion];
+        const extra =
+          name === "leftUpperArm" ? (open?.left ?? 0) * armK + armLift.left : name === "rightUpperArm" ? -(open?.right ?? 0) * armK + armLift.right : 0;
+        st[0] = step(st[0], e[0] * armK);
+        st[1] = step(st[1], e[1]);
+        st[2] = step(st[2], e[2] * armK + extra);
+        poseState.set(name, st);
+        b.rotation.set(st[0], st[1], st[2]);
       }
       // Waving back: right arm up, forearm swinging, for ~2.4 s (blended over her current pose).
       const wk = envelope(t, waveStart, waveStart + 1.6, 0.35, 0, 0.5);
       const rUp = vrm.humanoid.getNormalizedBoneNode("rightUpperArm");
       const rLow = vrm.humanoid.getNormalizedBoneNode("rightLowerArm");
       if (rUp && rLow && wk > 0) {
-        rUp.rotation.z = lerp(rUp.rotation.z, -0.25 * armK, wk);
+        rUp.rotation.z = lerp(rUp.rotation.z, -0.25 * armK + armLift.right, wk);
         rUp.rotation.x = lerp(rUp.rotation.x, 0, wk);
         rLow.rotation.y = lerp(rLow.rotation.y, 0, wk);
         rLow.rotation.z = lerp(rLow.rotation.z, -(0.9 + 0.35 * Math.sin(t * 9)) * armK, wk);

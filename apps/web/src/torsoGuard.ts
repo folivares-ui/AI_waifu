@@ -23,6 +23,8 @@ export class TorsoGuard {
   private hipsRestQuatInv = new THREE.Quaternion();
   /** Current outward correction per arm (radians), eased so the arm never jumps. */
   private push = { left: 0, right: 0 };
+  /** Seconds left to keep the current correction before easing it back. */
+  private hold = { left: 0, right: 0 };
 
   private constructor(private vrm: VRM) {}
 
@@ -37,15 +39,23 @@ export class TorsoGuard {
     hips.getWorldPosition(g.hipsRestPos);
     g.hipsRestQuatInv.copy(hips.getWorldQuaternion(new THREE.Quaternion())).invert();
 
-    // Skin that belongs to the torso: not arms, head (hair), or legs below the thigh.
-    const excluded = new Set<THREE.Object3D>();
-    for (const n of ["leftShoulder", "rightShoulder", "leftUpperArm", "rightUpperArm", "head", "leftLowerLeg", "rightLowerLeg"]) {
-      raw(n)?.traverse((o) => excluded.add(o));
+    // Skin of the body itself: only vertices that follow the core bones (hips, spine, chest, neck, thighs).
+    // Clothes that hang from their own bones (coat tails, skirts, capes), hair and accessories are left out:
+    // they move and the arms may brush them, but they are not her body.
+    const core = new Set<THREE.Object3D>();
+    // (thighs are left out: hanging hands rest against them, as a real person's do)
+    for (const n of ["hips", "spine", "chest", "upperChest", "neck"]) {
+      const o = raw(n);
+      if (o) core.add(o);
     }
-    const top = (raw("neck") ?? raw("head"))?.getWorldPosition(new THREE.Vector3()).y ?? g.hipsRestPos.y + 0.5;
-    g.y0 = g.hipsRestPos.y - 0.3;
+    // The arms can only collide with the torso below the armpits: shoulders are where the arms attach, so the
+    // body shape stops a few cm under the upper-arm joints.
+    const neckY = (raw("neck") ?? raw("head"))?.getWorldPosition(new THREE.Vector3()).y ?? g.hipsRestPos.y + 0.5;
+    const armY = Math.min(...(["leftUpperArm", "rightUpperArm"].map((n) => raw(n)?.getWorldPosition(new THREE.Vector3()).y).filter((y): y is number => y !== undefined)), neckY);
+    const top = Math.min(neckY, armY - 0.05);
+    g.y0 = g.hipsRestPos.y - 0.06; // from the hips up: belly, waist and chest
     const count = Math.ceil((top - g.y0) / STEP);
-    const bands: (Band | undefined)[] = Array.from({ length: count }, () => undefined);
+    const samples: { x: number[]; z: number[] }[] = Array.from({ length: count }, () => ({ x: [], z: [] }));
     const v = new THREE.Vector3();
     let used = 0;
     vrm.scene.traverse((o) => {
@@ -60,19 +70,24 @@ export class TorsoGuard {
         let best = 0;
         for (let k = 1; k < 4; k++) if (sw.getComponent(i, k) > sw.getComponent(i, best)) best = k;
         const bone = m.skeleton.bones[si.getComponent(i, best)];
-        if (!bone || excluded.has(bone)) continue;
+        if (!bone || !core.has(bone)) continue;
         m.getVertexPosition(i, v).applyMatrix4(m.matrixWorld);
         const b = Math.floor((v.y - g.y0) / STEP);
         if (b < 0 || b >= count) continue;
         v.sub(g.hipsRestPos);
-        const band = (bands[b] ??= { minX: 0, maxX: 0, minZ: 0, maxZ: 0 });
-        band.minX = Math.min(band.minX, v.x);
-        band.maxX = Math.max(band.maxX, v.x);
-        band.minZ = Math.min(band.minZ, v.z);
-        band.maxZ = Math.max(band.maxZ, v.z);
+        samples[b].x.push(v.x);
+        samples[b].z.push(v.z);
         used++;
       }
     });
+    // Per band, the 2nd..98th percentile: a few stray vertices must not make the body look wider than it is.
+    const pct = (arr: number[], q: number) => {
+      const s = [...arr].sort((a, b) => a - b);
+      return s[Math.min(s.length - 1, Math.max(0, Math.round(q * (s.length - 1))))];
+    };
+    const bands: (Band | undefined)[] = samples.map((sm) =>
+      sm.x.length < 6 ? undefined : { minX: Math.min(0, pct(sm.x, 0.02)), maxX: Math.max(0, pct(sm.x, 0.98)), minZ: Math.min(0, pct(sm.z, 0.02)), maxZ: Math.max(0, pct(sm.z, 0.98)) },
+    );
     if (used < 50) return undefined;
     g.bands = bands;
     return g;
@@ -130,41 +145,62 @@ export class TorsoGuard {
    * vrm.update run). `outward(side)` gives the sign that raises that arm sideways on the normalized bone's z.
    * Returns how many corrections were needed (for tests).
    */
+  /**
+   * The smallest outward rotation (radians) of this upper arm that keeps the whole arm clear of the body,
+   * from the arm's current pose. Leaves the bones as they were.
+   */
+  need(side: "left" | "right", outward: number, margin = 1.03): number {
+    const H = this.vrm.humanoid;
+    const bone = H.getNormalizedBoneNode(`${side}UpperArm` as never);
+    if (!bone) return 0;
+    const base = bone.rotation.z;
+    const clear = (push: number) => {
+      bone.rotation.z = base + push * outward;
+      H.update();
+      H.getRawBoneNode(`${side}Shoulder` as never)?.updateMatrixWorld(true);
+      H.getRawBoneNode(`${side}UpperArm` as never)?.updateMatrixWorld(true);
+      return this.armPoints(side).every((p) => this.depth(p) >= margin);
+    };
+    let result = 0;
+    if (!clear(0)) {
+      let lo = 0;
+      let hi = 0.9;
+      if (clear(hi)) {
+        for (let i = 0; i < 6; i++) {
+          const mid = (lo + hi) / 2;
+          if (clear(mid)) hi = mid;
+          else lo = mid;
+        }
+      }
+      result = hi;
+    }
+    bone.rotation.z = base;
+    H.update();
+    return result;
+  }
+
+  /**
+   * Moves the arms out of the body if a sway brings them in. Call after the pose is applied (normalized bones
+   * set). `outward` gives, per arm, the sign that raises it sideways on the normalized bone's z.
+   * Returns how many arms needed a correction this frame (for tests).
+   */
   apply(dt: number, outward: { left: number; right: number }): number {
     const H = this.vrm.humanoid;
     let fixes = 0;
     for (const side of ["left", "right"] as const) {
       const bone = H.getNormalizedBoneNode(`${side}UpperArm` as never);
       if (!bone) continue;
-      const base = bone.rotation.z;
-      const clear = (push: number, margin: number) => {
-        bone.rotation.z = base + push * outward[side];
-        H.update();
-        H.getRawBoneNode(`${side}Shoulder` as never)?.updateMatrixWorld(true);
-        H.getRawBoneNode(`${side}UpperArm` as never)?.updateMatrixWorld(true);
-        return this.armPoints(side).every((p) => this.depth(p) >= margin);
-      };
-      // The smallest outward correction that keeps the arm clear of the body (with a little margin so it does
-      // not flicker on the boundary), found by bisection.
-      let need = 0;
-      if (!clear(0, 1.03)) {
-        let lo = 0;
-        let hi = 0.9;
-        if (clear(hi, 1.03)) {
-          for (let i = 0; i < 6; i++) {
-            const mid = (lo + hi) / 2;
-            if (clear(mid, 1.03)) hi = mid;
-            else lo = mid;
-          }
-        }
-        need = hi;
-        fixes++;
-      }
-      // Ease towards it: quickly out of the body, slowly back in (no back-and-forth trembling).
-      const cur = this.push[side];
-      const next = need > cur ? Math.min(need, cur + dt * 4) : Math.max(need, cur - dt * 0.5);
-      this.push[side] = next;
-      bone.rotation.z = base + next * outward[side];
+      const need = this.need(side, outward[side]);
+      if (need > 0) fixes++;
+      // Hold a correction for a while once it was needed (an arm that brushes her on every sway must not go in
+      // and out all the time), and follow the target like a damped spring: no jerks either way.
+      if (need > 0) this.hold[side] = 1.5;
+      else this.hold[side] = Math.max(0, this.hold[side] - dt);
+      const target = Math.max(need, this.hold[side] > 0 ? this.push[side] : 0);
+      const k = Math.min(1, dt * (target > this.push[side] ? 4 : 1.2));
+      const maxStep = dt * 0.8; // never faster than 0.8 rad/s: no visible jerk when it engages
+      this.push[side] += Math.max(-maxStep, Math.min(maxStep, (target - this.push[side]) * k));
+      bone.rotation.z += this.push[side] * outward[side];
       H.update();
     }
     return fixes;

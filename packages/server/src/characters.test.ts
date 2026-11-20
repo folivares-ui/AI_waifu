@@ -28,7 +28,7 @@ describe("characters", () => {
     ]);
     expect(c.load("midnight").names?.aliases).toEqual(["Midnight", "Nemuri", "Kayama"]);
     const rebecca = c.load("rebecca");
-    expect(rebecca.motion).toEqual({ energy: 1.7, tempo: 1.35, bounce: 0.6, fidget: 0.75 });
+    expect(rebecca.motion).toEqual({ energy: 1.4, tempo: 1.12, bounce: 0.45, fidget: 0.55 });
     expect(c.load("default").motion).toBeUndefined(); // Rice keeps the calm default
     expect(rebecca.owner?.honorific).toBe("choom");
     expect(rebecca.growth?.map((t) => t.id)).toEqual(["calma", "apertura", "cercania"]);
