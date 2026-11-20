@@ -66,4 +66,14 @@ describe("body language", () => {
     const inward = -Math.min(...z);
     expect(out).toBeGreaterThan(2.5 * inward);
   });
+  it("talking gestures change smoothly from frame to frame (no trembling)", () => {
+    const style = { energy: 1.7, tempo: 1.35 };
+    let worst = 0;
+    for (let i = 1; i < 2000; i++) {
+      const a = at((i - 1) / 60, { speaking: true, level: 0.5, style }).leftLowerArm![1];
+      const b = at(i / 60, { speaking: true, level: 0.5, style }).leftLowerArm![1];
+      worst = Math.max(worst, Math.abs(b - a));
+    }
+    expect(worst).toBeLessThan(0.05); // radians per frame at 60 fps: no jumps when switching arms
+  });
 });

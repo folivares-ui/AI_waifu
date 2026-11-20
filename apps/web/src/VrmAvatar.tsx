@@ -89,6 +89,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
     let rig: BoneFaceRig | undefined;
     let armPoses: ArmSolutions = {};
     let torso: TorsoGuard | undefined;
+    let voiceLevelSmooth = 0;
     let springs: ReturnType<typeof addSpringChains>;
     const rigCur = Object.fromEntries(CHANNEL_NAMES.map((n) => [n, 0])) as Record<Channel, number>;
     let nextTwitch = 3;
@@ -202,7 +203,8 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
       if (p.speaking) {
         const raw = p.getLevel?.() ?? -1; // negative = no audio signal (browser voice): simulate flapping
         const lvl = raw >= 0 ? raw : 0.35 + 0.35 * Math.sin(t * 13) * Math.sin(t * 5.3);
-        voiceLevel = lvl;
+        voiceLevelSmooth += (lvl - voiceLevelSmooth) * Math.min(1, dt * 5); // gestures follow the voice, not every peak
+        voiceLevel = voiceLevelSmooth;
         const open = Math.min(0.8, lvl * 2.2); // leave room for the emotion to stay visible
         const shape = (Math.sin(t * 6.1) + 1) / 2; // vary vowels a little
         target.aa = open * (0.55 + 0.45 * shape);

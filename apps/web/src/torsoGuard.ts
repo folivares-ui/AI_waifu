@@ -137,18 +137,35 @@ export class TorsoGuard {
       const bone = H.getNormalizedBoneNode(`${side}UpperArm` as never);
       if (!bone) continue;
       const base = bone.rotation.z;
-      // Ease the previous correction back towards zero, then add what is needed now.
-      this.push[side] = Math.max(0, this.push[side] - dt * 0.6);
-      for (let i = 0; i < 8; i++) {
-        bone.rotation.z = base + this.push[side] * outward[side];
+      const clear = (push: number, margin: number) => {
+        bone.rotation.z = base + push * outward[side];
         H.update();
         H.getRawBoneNode(`${side}Shoulder` as never)?.updateMatrixWorld(true);
         H.getRawBoneNode(`${side}UpperArm` as never)?.updateMatrixWorld(true);
-        const inside = this.armPoints(side).some((p) => this.depth(p) < 1);
-        if (!inside) break;
-        this.push[side] = Math.min(0.9, this.push[side] + 0.05);
+        return this.armPoints(side).every((p) => this.depth(p) >= margin);
+      };
+      // The smallest outward correction that keeps the arm clear of the body (with a little margin so it does
+      // not flicker on the boundary), found by bisection.
+      let need = 0;
+      if (!clear(0, 1.03)) {
+        let lo = 0;
+        let hi = 0.9;
+        if (clear(hi, 1.03)) {
+          for (let i = 0; i < 6; i++) {
+            const mid = (lo + hi) / 2;
+            if (clear(mid, 1.03)) hi = mid;
+            else lo = mid;
+          }
+        }
+        need = hi;
         fixes++;
       }
+      // Ease towards it: quickly out of the body, slowly back in (no back-and-forth trembling).
+      const cur = this.push[side];
+      const next = need > cur ? Math.min(need, cur + dt * 4) : Math.max(need, cur - dt * 0.5);
+      this.push[side] = next;
+      bone.rotation.z = base + next * outward[side];
+      H.update();
     }
     return fixes;
   }

@@ -157,9 +157,10 @@ export function bodyPose(s: BodyState): BodyPose {
       // torso twist to one side
       pose.spine = add(pose.spine, [0, 0.12 * k * (rnd(slot) > 0.5 ? 1 : -1), 0]);
     } else if (move === 3) {
-      // arms swing forward and back, like shaking off energy
-      pose.leftUpperArm = add(pose.leftUpperArm, [-0.25 * k * Math.sin(t * 6), 0, 0]);
-      pose.rightUpperArm = add(pose.rightUpperArm, [0.25 * k * Math.sin(t * 6), 0, 0]);
+      // arms swing forward and back once, like shaking off energy (one smooth swing per slot)
+      const swing = Math.sin(phase * 2 * Math.PI);
+      pose.leftUpperArm = add(pose.leftUpperArm, [-0.2 * k * swing, 0, 0]);
+      pose.rightUpperArm = add(pose.rightUpperArm, [0.2 * k * swing, 0, 0]);
     } else {
       // weight on one leg, hip popped
       pose.hips = add(pose.hips, [0, 0, 0.06 * k]);
@@ -172,23 +173,33 @@ export function bodyPose(s: BodyState): BodyPose {
 
   // Talking: hand gestures on the beat of her voice, one arm or both, changing every ~1.4 s.
   if (s.speaking && s.emotion !== "thinking") {
-    const slot = Math.floor(t / 1.4);
-    const pick = rnd(slot);
-    const beat = Math.min(1, 0.35 + s.level * 1.4) * (0.75 + 0.25 * Math.sin(t * 7)) * Math.min(1.6, energy);
-    const left = pick < 0.45 || pick > 0.8;
-    const right = pick >= 0.45;
+    // Which arm(s) gesture changes every ~1.4 s, cross-faded over the first 0.9 s of each slot (no jumps).
+    const SLOT = 1.4;
+    const slot = Math.floor(t / SLOT);
+    const arms = (n: number) => {
+      const pick = rnd(n);
+      return { left: pick < 0.45 || pick > 0.8 ? 1 : 0, right: pick >= 0.45 ? 1 : 0 };
+    };
+    const f = Math.min(1, (t - slot * SLOT) / 0.9);
+    const blend = f * f * (3 - 2 * f); // smoothstep
+    const prev = arms(slot - 1);
+    const cur = arms(slot);
+    const wL = prev.left + (cur.left - prev.left) * blend;
+    const wR = prev.right + (cur.right - prev.right) * blend;
+    // A slow, even beat (the voice level is already smoothed by the caller).
+    const beat = Math.min(1, 0.35 + s.level * 1.4) * (0.8 + 0.2 * Math.sin(t * 2.6)) * Math.min(1.6, energy);
     const g = (k: number): [Euler3, Euler3] => [[-0.32 * k, 0, 0.18 * k], [0, -0.75 * k, 0]];
-    if (left) {
-      const [u, l] = g(beat);
+    if (wL > 0) {
+      const [u, l] = g(beat * wL);
       pose.leftUpperArm = add(pose.leftUpperArm, u);
       pose.leftLowerArm = add(pose.leftLowerArm, l);
-      pose.leftHand = add(pose.leftHand, [0, 0, 0.25 * beat]);
+      pose.leftHand = add(pose.leftHand, [0, 0, 0.25 * beat * wL]);
     }
-    if (right) {
-      const [u, l] = g(beat);
+    if (wR > 0) {
+      const [u, l] = g(beat * wR);
       pose.rightUpperArm = add(pose.rightUpperArm, mirror(u));
       pose.rightLowerArm = add(pose.rightLowerArm, mirror(l));
-      pose.rightHand = add(pose.rightHand, mirror([0, 0, 0.25 * beat]));
+      pose.rightHand = add(pose.rightHand, mirror([0, 0, 0.25 * beat * wR]));
     }
   }
   return pose;
