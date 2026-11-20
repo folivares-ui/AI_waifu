@@ -63,8 +63,13 @@ function calibrated(emotion: Emotion, arms: ArmSolutions | undefined): BodyPose 
   const pose = EMOTION_POSES[emotion];
   const sym = (s: ArmSolution | undefined, hand: Euler3) => s && { ...pose, ...both(s.upper, [0, s.lower, 0], hand, pose.leftShoulder) };
   switch (emotion) {
-    case "angry":
+    case "angry": {
+      // Tsundere: arms crossed (one forearm over the other); hands on the hips if that cannot be solved.
+      const front = a("crossFront");
+      const back = a("crossBack");
+      if (front && back) return { ...pose, leftUpperArm: front.upper, leftLowerArm: [0, front.lower, 0], leftHand: [0, 0, 0.1], rightUpperArm: mirror(back.upper), rightLowerArm: [0, -back.lower, 0], rightHand: [0, 0, -0.1] };
       return sym(a("hips"), [0, 0, 0.25]);
+    }
     case "shy":
       return sym(a("together"), [0, 0, -0.1]);
     case "surprised":

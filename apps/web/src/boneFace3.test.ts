@@ -59,4 +59,13 @@ describe("face rig family 3 (F_L_EyelidTop...)", () => {
     expect(own("squint", "F_L_EyelidTop")![1]).toBeLessThan(0);
     expect(own("squint", "F_L_EyelidBottom")![1]).toBeGreaterThan(0);
   });
+  it("pout: the lower lip goes up and forward, the corners down", () => {
+    const { head, nodes } = face();
+    const moves = geometryMovesF(head, nodes);
+    const lip = moves.find((m) => m.channel === "mouthPout" && m.node.name.startsWith("F_C_MouthBottom")) as { mm: number[] };
+    expect(lip.mm[1]).toBeGreaterThan(0);
+    expect(lip.mm[2]).toBeGreaterThan(0);
+    const corner = moves.find((m) => m.channel === "mouthPout" && m.node.name.startsWith("F_L_MouthCorners")) as { mm: number[] };
+    expect(corner.mm[1]).toBeLessThan(0);
+  });
 });

@@ -33,11 +33,12 @@ export interface TouchFx {
 }
 
 /** Expression weights (VRM preset names) and gaze/head offsets per emotion. */
-const POSES: Record<Emotion, { expr: Record<string, number>; look: [number, number]; tilt: number }> = {
+const POSES: Record<Emotion, { expr: Record<string, number>; look: [number, number]; tilt: number; yaw?: number; chinUp?: number }> = {
   neutral: { expr: {}, look: [0, 0], tilt: 0 },
   happy: { expr: { happy: 0.9 }, look: [0, 0.03], tilt: 0.04 },
   sad: { expr: { sad: 1 }, look: [0, -0.15], tilt: -0.03 },
-  angry: { expr: { angry: 1 }, look: [0, 0], tilt: 0 },
+  // Tsundere "hmph": head turned away with the chin up, eyes still glaring at you from the side.
+  angry: { expr: { angry: 1 }, look: [0, 0], tilt: 0.06, yaw: 0.38, chinUp: 0.1 },
   surprised: { expr: { surprised: 1 }, look: [0, 0.05], tilt: 0 },
   thinking: { expr: { relaxed: 0.4 }, look: [0.25, 0.25], tilt: 0.09 },
   shy: { expr: { relaxed: 0.7 }, look: [-0.15, -0.2], tilt: 0.1 },
@@ -293,8 +294,10 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         const side = reaction?.side ?? 0;
         // VRM 0.x normalized bones are mirrored (see the arm pose), so the roll towards the hand flips with it.
         const mirror = vrm.meta.metaVersion === "0" ? -1 : 1;
-        head.rotation.x = lerp(head.rotation.x, Math.sin(t * 0.9) * 0.02 + nod + (p.listening ? 0.03 : 0) + (re?.pitch ?? 0) * k, dt * 5);
-        head.rotation.y = lerp(head.rotation.y, Math.sin(t * 0.55) * 0.05 + (re?.shrink ? 0.3 * side * mirror * k : 0), dt * 3);
+        const devPose = POSES[(import.meta.env.DEV ? (window as unknown as { __bodyEmotion?: Emotion }).__bodyEmotion : undefined) ?? p.emotion];
+        const chinUp = (devPose?.chinUp ?? 0) * mirror; // VRM 0.x flips the pitch axis
+        head.rotation.x = lerp(head.rotation.x, Math.sin(t * 0.9) * 0.02 + nod + (p.listening ? 0.03 : 0) + (re?.pitch ?? 0) * k - chinUp, dt * 5);
+        head.rotation.y = lerp(head.rotation.y, Math.sin(t * 0.55) * 0.05 + (devPose?.yaw ?? 0) + (re?.shrink ? 0.3 * side * mirror * k : 0), dt * 3);
         head.rotation.z = lerp(head.rotation.z, pose.tilt + (p.listening ? 0.03 : 0) - (re?.tiltToward ?? 0) * side * mirror * k, dt * 3);
       }
       const spine = vrm.humanoid.getNormalizedBoneNode("spine");

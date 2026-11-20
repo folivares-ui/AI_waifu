@@ -13,7 +13,7 @@ export interface ArmSolution {
   /** Elbow bend (lower arm y). */
   lower: number;
 }
-export type ArmTargets = "hips" | "together" | "chest" | "chin" | "across";
+export type ArmTargets = "hips" | "together" | "chest" | "chin" | "across" | "crossFront" | "crossBack";
 export type ArmSolutions = Partial<Record<ArmTargets, ArmSolution>>;
 
 /** Starting points (found offline on two models of different proportions). */
@@ -23,6 +23,8 @@ const SEEDS: Record<ArmTargets, ArmSolution[]> = {
   chest: [{ upper: [-0.2, -0.4, -1.2], lower: -2.45 }, { upper: [0.2, -0.4, -0.6], lower: -2.15 }],
   chin: [{ upper: [-0.9, -1, -1], lower: -2.45 }, { upper: [-0.1, -1, -0.5], lower: -2.45 }],
   across: [{ upper: [0.2, -1, -1.2], lower: -1.7 }, { upper: [-0.1, -1, -1.4], lower: -0.95 }],
+  crossFront: [{ upper: [-0.6, -1, -1.2], lower: -2.0 }, { upper: [-0.2, -0.9, -1.0], lower: -2.3 }],
+  crossBack: [{ upper: [-0.4, -1, -1.25], lower: -2.2 }, { upper: [0, -0.9, -1.1], lower: -2.4 }],
 };
 
 export function solveArmPoses(vrm: VRM): ArmSolutions {
@@ -61,6 +63,9 @@ export function solveArmPoses(vrm: VRM): ArmSolutions {
       chest: [9, headY * 0.62, 14],
       chin: [0, headY - 9, headZ + 9],
       across: [-4, headY * 0.12, 14],
+      // Arms crossed over the chest: one forearm in front, the other a little lower and closer to the body.
+      crossFront: [-shoulderW * 0.36, headY * 0.58, 14],
+      crossBack: [-shoulderW * 0.3, headY * 0.48, 8],
     };
     const out: ArmSolutions = {};
     for (const target of Object.keys(goal) as ArmTargets[]) {

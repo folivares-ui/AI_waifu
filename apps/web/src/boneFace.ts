@@ -38,6 +38,8 @@ export const CHANNELS = {
   // Annoyed look: inner brows pulled together towards the nose, and narrowed eyes (upper lid down, lower lid up).
   browFurrow: [{ bones: /^Eyebrow_0[14]_L$/, mm: [-2.5, -1.5, 0] }, { bones: /^Eyebrow_0[14]_R$/, mm: [2.5, -1.5, 0] }],
   squint: [{ bones: UPPER_LID, mm: [0, -9, 0] }, { bones: LOWER_LID, mm: [0, 4, 0] }],
+  // Pout: lower lip pushed up and forward, corners down.
+  mouthPout: [{ bones: /^Mouth_bottom_01_[CLR]$/, mm: [0, 1.5, 2] }, { bones: MOUTH_CORNER, mm: [0, -2, 0] }],
   // Jaw drop graded from the centre of the lower lip to the corners, so the opening has a rounded bottom
   // (combined with mouthSmile it becomes the open "D" smile).
   mouthOpen: [
@@ -70,7 +72,7 @@ export const RIG_POSES: Record<Emotion, Weights> = {
   happy: { eyeSmile: 0.9, mouthSmile: 1, browUp: 0.3, earsPerk: 1 },
   sad: { browSad: 1, mouthFrown: 1, blink: 0.22, earsDroop: 1 },
   // Annoyed/angry: furrowed brows pulled together, narrowed glaring eyes, mouth pressed into a frown.
-  angry: { browAngry: 1, browFurrow: 1, squint: 0.7, mouthFrown: 0.9, mouthNarrow: 0.45, earsBack: 1 },
+  angry: { browAngry: 1.3, browFurrow: 1.35, squint: 0.9, mouthFrown: 1, mouthNarrow: 0.55, mouthPout: 1, earsBack: 1 },
   surprised: { eyeWide: 1, browUp: 1, mouthOpen: 0.3, mouthNarrow: 0.5, earsPerk: 1 },
   thinking: { browUp: 0.35, mouthNarrow: 0.6, earsDroop: 0.25 },
   shy: { eyeSmile: 0.45, mouthSmile: 0.5, browSad: 0.6, earsDroop: 0.7 },
@@ -245,6 +247,12 @@ export function geometryMoves(head: THREE.Object3D, nodes: THREE.Object3D[]): Ge
       mm("mouthFrown", o, 0, -2.6 * k, 0);
       mm("mouthNarrow", o, -out_ * 2.5 * k, 0, 0);
       mm("mouthWide", o, out_ * 2.5 * k, 0.4 * k, 0);
+      mm("mouthPout", o, 0, -2 * k, 0);
+    }
+    // Pout: the lower lip (it hangs from the jaw) goes up and forward, most in the centre.
+    for (const o of find(/^(U lip|[LR]U lip [A-Z])$/)) {
+      const c = 1 - Math.min(1, Math.abs(pos(o).x) / (width || 1));
+      mm("mouthPout", o, 0, 1.6 * c, 2 * c);
     }
   }
   // Jaw: rotating it opens the mouth (the lower lip, lower teeth and tongue hang from it).
@@ -313,7 +321,11 @@ export function geometryMovesF(head: THREE.Object3D, nodes: THREE.Object3D[]): G
     put("mouthWide", corner, out * 2.5, 0.4, 0);
     put("mouthSmile", one(new RegExp(`^F ${side} MouthTop$`)), out * 0.4, 0.8, 0);
     put("mouthFrown", one(new RegExp(`^F ${side} MouthBottom$`)), 0, -0.8, 0);
+    put("mouthPout", corner, 0, -2, 0);
+    put("mouthPout", one(new RegExp(`^F ${side} MouthBottom$`)), 0, 1.0, 1.4);
   }
+
+  put("mouthPout", one(/^F C MouthBottom$/), 0, 1.6, 2);
 
   const out: GeoMove[] = [];
   for (const [channel, bones] of want) {

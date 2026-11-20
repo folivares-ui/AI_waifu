@@ -30,4 +30,16 @@ describe("body language", () => {
     expect(p.rightLowerArm![1]).toBeGreaterThan(1.7); // mirrored elbow
     expect(at(0, { emotion: "angry" }).leftUpperArm![1]).toBeCloseTo(0, 5); // fixed table without a solution
   });
+  it("angry = arms crossed when the model's crossing poses could be solved", () => {
+    const arms = {
+      crossFront: { upper: [-0.5, -1, -1.2] as [number, number, number], lower: -2.1 },
+      crossBack: { upper: [-0.3, -0.9, -1.2] as [number, number, number], lower: -2.3 },
+      hips: { upper: [0.9, -0.6, -0.6] as [number, number, number], lower: -1.8 },
+    };
+    const p = at(0, { emotion: "angry", arms });
+    expect(p.leftLowerArm![1]).toBeLessThan(-1.9); // front forearm across the chest
+    expect(p.rightUpperArm![1]).toBeCloseTo(0.9, 1); // the back arm, mirrored
+    const noCross = at(0, { emotion: "angry", arms: { hips: arms.hips } });
+    expect(noCross.leftUpperArm![1]).toBeCloseTo(-0.6, 1); // falls back to hands on the hips
+  });
 });
