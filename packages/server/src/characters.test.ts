@@ -16,11 +16,12 @@ const setup = () => {
 };
 
 describe("characters", () => {
-  it("ships Rice Shower (default), Agnes Tachyon, Rebecca and Midnight; old example souls are hidden", () => {
+  it("ships Rice Shower (default), Agnes Tachyon, Rebecca, Midnight and Caulifla; old example souls are hidden", () => {
     const { c } = setup();
     const list = c.list();
     expect(list.map((x) => [x.id, x.name, x.builtIn])).toEqual([
       ["agnes-tachyon", "Agnes Tachyon", true],
+      ["caulifla", "Caulifla", true],
       ["default", "Rice Shower", true],
       ["midnight", "Midnight", true],
       ["rebecca", "Rebecca", true],
