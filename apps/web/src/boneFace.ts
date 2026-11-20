@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { VRM } from "@pixiv/three-vrm";
 import type { Emotion } from "@waifu/core";
+import { SynthFace } from "./synthFace";
 
 /**
  * Facial expressions for models that ship WITHOUT blendshapes/expressions but WITH a facial bone rig
@@ -91,6 +92,8 @@ interface Driven {
 
 export class BoneFaceRig {
   private driven: Driven[] = [];
+  /** Eyelids / jaw built from the mesh when the rig has no bones for them (family 4). */
+  private synth?: SynthFace;
   readonly channels = new Set<Channel>();
 
   /** Returns a rig if the model has no facial expressions of its own but has recognisable face bones. */
@@ -144,6 +147,21 @@ export class BoneFaceRig {
       const head = vrm.humanoid.getRawBoneNode("head");
       if (head) for (const m of geometryMovesF(head, candidates)) add(m.channel, m.node, m);
     }
+    // Family 4: "Facial_Elbow_A_01_L" (eyebrows), "Facial_Mouth_A_01_L/M/R", "Facial_Cheek_A_01_L"... and no
+    // eyelid or jaw bones: those two are built from the face mesh itself (synthFace.ts).
+    if (this.channels.size === 0) {
+      const head = vrm.humanoid.getRawBoneNode("head");
+      const moves = head ? geometryMovesFacial(head, candidates) : [];
+      for (const m of moves) add(m.channel, m.node, m);
+      if (moves.length) {
+        const find = (re: RegExp) => candidates.find((o) => re.test(famF(o.name)));
+        const l = find(/^Facial Mouth A 01 L$/);
+        const r = find(/^Facial Mouth A 01 R$/);
+        this.synth = SynthFace.build(vrm, l && r ? [l, r] : undefined);
+        if (this.synth?.hasEyes) for (const c of ["blink", "squint", "eyeSmile", "eyeWide"] as const) this.channels.add(c);
+        if (this.synth?.hasMouth) this.channels.add("mouthOpen");
+      }
+    }
     this.driven = [...byNode.values()];
   }
 
@@ -152,6 +170,7 @@ export class BoneFaceRig {
 
   /** Poses the face. Weights are 0..1; channels add up on bones they share. */
   apply(w: Weights) {
+    this.synth?.apply(w);
     for (const d of this.driven) {
       d.node.position.copy(d.restPos);
       for (const o of d.offsets) {
@@ -349,5 +368,55 @@ export function geometryMovesF(head: THREE.Object3D, nodes: THREE.Object3D[]): G
     const reach = lip ? Math.max(30, Math.hypot(pos(lip).y - pos(jaw).y, pos(lip).z - pos(jaw).z)) : 90;
     out.push({ channel: "mouthOpen", node: jaw, rot: [11 / reach, 0, 0] });
   }
+  return out;
+}
+
+// ---------- family 4: "Facial_Elbow_A/B/C_01_L" (eyebrows), "Facial_Mouth_A_01_L/M/R", "Facial_Cheek_A_01_L" ----
+
+/**
+ * Eyebrows (inner A, middle B, outer C; the brow follows them fully), mouth corners (L/R) and the middle of the
+ * lips (M), cheeks. Sizes are scaled to the face (brow length, mouth width). Directions come from where each
+ * bone is, so it does not matter which way the model's axes point.
+ */
+export function geometryMovesFacial(head: THREE.Object3D, nodes: THREE.Object3D[]): GeoMove[] {
+  head.updateMatrixWorld(true);
+  const origin = head.getWorldPosition(new THREE.Vector3());
+  const pos = (o: THREE.Object3D) => o.getWorldPosition(new THREE.Vector3()).sub(origin).multiplyScalar(1000); // mm
+  const one = (re: RegExp) => nodes.find((o) => re.test(famF(o.name)));
+  const out: GeoMove[] = [];
+  const mm = (channel: Channel, node: THREE.Object3D | undefined, x: number, y: number, z: number) => {
+    if (node) out.push({ channel, node, mm: [x, y, z] });
+  };
+  for (const side of ["L", "R"]) {
+    const brows = ["A", "B", "C"].map((k) => one(new RegExp(`^Facial Elbow ${k} 01 ${side}$`)));
+    if (brows.every(Boolean)) {
+      const [a, , c] = brows.map((b) => pos(b!));
+      const span = Math.hypot(a.x - c.x, a.y - c.y);
+      const unit = Math.max(3, Math.min(6, span * 0.18)); // ~4.5 mm
+      const inward = -Math.sign(a.x) || 1; // towards the nose
+      brows.forEach((b, i) => {
+        const t = i / 2; // 0 inner .. 1 outer
+        mm("browUp", b, 0, unit, 0);
+        mm("browAngry", b, 0, unit * (-0.9 + 1.4 * t), 0);
+        mm("browSad", b, 0, unit * (0.9 - 1.4 * t), 0);
+        mm("browFurrow", b, inward * unit * 0.45 * (1 - t), -unit * 0.25 * (1 - t), 0);
+      });
+    }
+    const corner = one(new RegExp(`^Facial Mouth A 01 ${side}$`));
+    const other = one(new RegExp(`^Facial Mouth A 01 ${side === "L" ? "R" : "L"}$`));
+    if (corner && other) {
+      const k = Math.max(0.6, Math.min(1.5, pos(corner).distanceTo(pos(other)) / 30)); // sizes tuned on a 3 cm mouth
+      const o = Math.sign(pos(corner).x) || 1; // outwards
+      mm("mouthSmile", corner, o * 1.5 * k, 3 * k, 0);
+      mm("mouthFrown", corner, 0, -2.6 * k, 0);
+      mm("mouthNarrow", corner, -o * 2.5 * k, 0, 0);
+      mm("mouthWide", corner, o * 2.5 * k, 0.4 * k, 0);
+      mm("mouthPout", corner, 0, -2 * k, 0);
+    }
+    const cheek = one(new RegExp(`^Facial Cheek A 01 ${side}$`));
+    mm("mouthSmile", cheek, 0, 2, 0);
+    mm("eyeSmile", cheek, 0, 2, 0);
+  }
+  mm("mouthPout", one(/^Facial Mouth A 01 M$/), 0, 0.8, 1.6);
   return out;
 }
