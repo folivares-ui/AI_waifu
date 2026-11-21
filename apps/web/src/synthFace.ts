@@ -242,6 +242,8 @@ interface Eye {
 
 /** Morph target (not a rig channel) that sinks a new-lid eye's layers out of sight once it is shut. */
 export const EYE_HIDE = "_eyeHide";
+/** Morph target that brings the upper lashes in front of the new lids as soon as they move. */
+export const LASH_FWD = "_lashFwd";
 
 /** Where the new lids meet when the eye is shut, as a fraction of its height from the bottom. */
 export const CURTAIN_MEET = 0.35;
@@ -656,6 +658,17 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
 
   // New-lid eyes: once shut, the eye's own layers sink behind the skin (out of sight, as in a closed anime eye)
   const hide: (Float32Array | undefined)[] = meshes.map(() => undefined);
+  // ...and the upper lashes come forward, in front of the new lid, as soon as it starts to move (they lie on it)
+  const lashFwd: (Float32Array | undefined)[] = meshes.map(() => undefined);
+  const lidFront = (e: Eye) => {
+    let f = -Infinity;
+    for (let i = 0; i < e.top.length; i++) {
+      if (!isFinite(e.top[i])) continue;
+      const x = e.x0 + i * RES;
+      for (let k = 0; k <= 10; k++) f = Math.max(f, e.ball.get(x, e.bottom[i] + ((e.top[i] - e.bottom[i]) * k) / 10) ?? -Infinity);
+    }
+    return isFinite(f) ? f + 0.0012 : undefined; // where EyeCurtain draws the lids
+  };
   const centres = new Map<number[], V3>();
   const pieceOf = new Map<string, number[]>();
   const sink = (mi: number, i: number) => {
@@ -759,6 +772,11 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
               const meet = lw.bottom + CURTAIN_MEET * g;
               const target = isUpper ? meet + 0.25 * Math.max(0, p[1] - lw.top) : meet - 0.25 * Math.max(0, lw.bottom - p[1]) - 0.001;
               dy = isUpper ? (target - p[1]) * (lw.fade ?? 1) : 0;
+              const lf = isUpper ? lidFront(eye) : undefined;
+              if (lf !== undefined && p[2] < lf + 0.0008) {
+                const a = (lashFwd[mi] ??= new Float32Array(m.pos.length));
+                a[i * 3 + 2] = Math.max(a[i * 3 + 2], lf + 0.0008 - p[2]);
+              }
               if (!isUpper) sink(mi, i); // the lower lashes stay until the eye is shut, then go: one line stays
             } else if (rigid && isUpper && lw.top !== undefined && lw.bottom !== undefined) {
               // Upper lashes and eyeliner all gather on the closed line (also at the corners, where the opening is
@@ -789,6 +807,7 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
 
   const extra: Record<string, (Float32Array | undefined)[]> = {};
   if (hide.some(Boolean)) extra[EYE_HIDE] = hide;
+  if (lashFwd.some(Boolean)) extra[LASH_FWD] = lashFwd;
   const put = (channel: string, mi: number, i: number, x: number, y: number, z: number) => {
     const arr = ((extra[channel] ??= meshes.map(() => undefined))[mi] ??= new Float32Array(meshes[mi].pos.length));
     arr[i * 3] += x;
@@ -1137,7 +1156,7 @@ export class SynthFace {
       const k = Math.max(0, Math.min(1, upper / 0.9));
       upper = k;
       lower = k * k * k;
-      w = { ...w, [EYE_HIDE]: smooth((k - 0.86) / 0.1) };
+      w = { ...w, [EYE_HIDE]: smooth((k - 0.86) / 0.1), [LASH_FWD]: Math.min(1, k * 8) };
     }
     const open = Math.max(0, w.mouthOpen ?? 0);
     for (const s of this.slots) {
