@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { VRM } from "@pixiv/three-vrm";
+import { EyeCurtain } from "./eyeCurtain";
 
 /**
  * Eyelids and mouth opening for models that have neither blendshapes nor eyelid/jaw bones (e.g. models converted
@@ -34,6 +35,8 @@ export interface FaceMorphs {
   extra: Record<string, (Float32Array | undefined)[]>;
   /** The eyebrow pieces found (only with `expressive`): mesh index and its vertices. */
   brows: { mesh: number; verts: number[] }[];
+  /** Eyes that get new eyelids instead of stretched skin. */
+  curtains: CurtainEye[];
   info: { eyes: number; gap: number[]; mouthWidth?: number; moved: number };
 }
 
@@ -228,6 +231,24 @@ interface Eye {
   gmax: number;
   /** Front-most eyeball surface (whites, iris): moving lids must stay in front of it. */
   ball: Grid;
+  /**
+   * The eyeball lives inside the face mesh itself (no separate eye meshes). The skin there was never meant to
+   * stretch over it, so the lids are new pieces of skin instead (see EyeCurtain) and the face is left as it is.
+   */
+  curtain?: boolean;
+}
+
+/** What the app needs to draw the new eyelids of one eye (face frame). */
+export interface CurtainEye {
+  face: number;
+  xs: number[];
+  top: number[];
+  bottom: number[];
+  gmax: number;
+  /** Front of the eyeball at a point (undefined outside it). */
+  ballZ: (x: number, y: number) => number | undefined;
+  /** A vertex of the face's skin, clear of the eye and the eyebrow: the lids take their colour from it. */
+  skinVertex: number;
 }
 
 function openingAt(e: Eye, x: number): { top: number; bottom: number; gap: number } | undefined {
@@ -352,9 +373,11 @@ function findEye(meshes: FaceMeshIn[], comps: number[][][], center: V3, midX?: n
   meshes.forEach((m, mi) => {
     for (const c of comps[mi]) {
       if (mi === face && skinPiece[c[0]]) continue;
+      if (c.length < 3) continue; // stray vertices that belong to no triangle
       const pts = c.map((i) => vtx(m, i));
       if (!pts.every(near)) continue;
       if (eyeballPiece(eye, pts, back)) {
+        if (mi === face) eye.curtain = true;
         for (let t = 0; t < m.index.length; t += 3) {
           const [ia, ib, ic] = [m.index[t], m.index[t + 1], m.index[t + 2]];
           if (c.includes(ia)) eye.ball.tri(vtx(m, ia), vtx(m, ib), vtx(m, ic));
@@ -628,6 +651,7 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
       for (const c of comps[mi]) {
         const pts = c.map((i) => vtx(m, i));
         const isFace = mi === face && c === skinOf(comps[mi]); // the face skin itself (its biggest piece)
+        if (isFace && eye.curtain) continue; // new lids cover the eye: the face skin stays put
         let rigid = false;
         if (!isFace) {
           // Pieces in front of the skin: lashes and eyeliner move with the lids; eyebrows, eyeballs and anything
@@ -648,6 +672,7 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
             // this the eye white can peek out at the corners, where the lid barely moves)
             // (eyeballs that are separate meshes sit well behind the lid: only their corners need it)
             const cornersOnly = mi !== face;
+            if (eye.curtain) continue;
             const cols = [...eye.top.keys()].filter((i) => isFinite(eye.top[i]));
             if (cols.length) {
               const ex0 = eye.x0 + cols[0] * RES;
@@ -788,7 +813,33 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
       }
     }
   }
-  return { upper, lower, mouth, extra, brows, info: { eyes: found.length, gap: found.map((f) => f.eye.gmax), mouthWidth, moved } };
+  const curtains: CurtainEye[] = found
+    .filter((f) => f.eye.curtain)
+    .map(({ eye, face }) => {
+      const idx = [...eye.top.keys()].filter((i) => isFinite(eye.top[i]));
+      // plain skin: the face skin vertex nearest to a point well above the eye (forehead), in front
+      const fm = meshes[face];
+      const skin = skinOf(comps[face]);
+      const cx = eye.x0 + ((idx[0] + idx[idx.length - 1]) / 2) * RES;
+      const ty = Math.max(...idx.map((i) => eye.top[i])) + 0.9 * eye.gmax;
+      const front = Math.max(...skin.map((i) => fm.pos[i * 3 + 2]));
+      let skinVertex = skin[0];
+      let bd = Infinity;
+      for (const i of skin) {
+        const d = Math.hypot(fm.pos[i * 3] - cx, fm.pos[i * 3 + 1] - ty) + Math.max(0, front - 0.03 - fm.pos[i * 3 + 2]);
+        if (d < bd) (bd = d), (skinVertex = i);
+      }
+      return {
+        skinVertex,
+        face,
+        xs: idx.map((i) => eye.x0 + i * RES),
+        top: idx.map((i) => eye.top[i]),
+        bottom: idx.map((i) => eye.bottom[i]),
+        gmax: eye.gmax,
+        ballZ: (x: number, y: number) => eye.ball.get(x, y),
+      };
+    });
+  return { upper, lower, mouth, extra, brows, curtains, info: { eyes: found.length, gap: found.map((f) => f.eye.gmax), mouthWidth, moved } };
 }
 
 // ---------- three.js glue ----------
@@ -811,6 +862,8 @@ export class SynthFace {
   readonly extraChannels: string[];
   /** How many eyebrow meshes are drawn over the hair. */
   browsOnTop = 0;
+  /** New eyelids (eyes that live inside the face mesh). */
+  curtains: EyeCurtain[] = [];
 
   private constructor(slots: SynthFace["slots"], hasEyes: boolean, hasMouth: boolean, extraChannels: string[]) {
     this.slots = slots;
@@ -926,6 +979,10 @@ export class SynthFace {
       slots.push(slot);
     });
     const face = new SynthFace(slots, res.info.eyes > 0, res.info.mouthWidth !== undefined, Object.keys(res.extra));
+    for (const ce of res.curtains) {
+      const c = EyeCurtain.build(head, ce, used[ce.face], inputs[ce.face].pos);
+      if (c) face.curtains.push(c);
+    }
     // The model's own eyebrows, when they are meshes of their own: in anime games they are drawn over the fringe
     // (a special pass the converted model lost), so they hide under the hair. Draw them after the hair, on top.
     // They keep their own shape and move with the eyebrow morphs above (up, angry, sad, furrow).
@@ -1006,5 +1063,6 @@ export class SynthFace {
       if (s.mouth !== undefined) inf[s.mouth] = open;
       for (const [c, k] of s.extra) inf[k] = w[c] ?? 0;
     }
+    for (const c of this.curtains) c.apply(upper, lower);
   }
 }
