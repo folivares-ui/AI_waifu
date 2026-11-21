@@ -408,7 +408,7 @@ function lidWeight(e: Eye, p: V3, upper: boolean, rigid: boolean): { w: number; 
       const x1 = e.x0 + cols[cols.length - 1] * RES;
       const x = Math.min(x1, Math.max(x0, p[0]));
       o = openingAt(e, x);
-      fade = smooth(1 - Math.abs(p[0] - x) / (0.5 * (x1 - x0)));
+      fade = smooth(1 - (Math.abs(p[0] - x) - 0.15 * (x1 - x0)) / (0.5 * (x1 - x0))); // fully with it just past the corner
     }
   }
   if (!o || fade <= 0) return { w: 0, gap: 0, inside: 0 };
@@ -646,6 +646,8 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
           if (onBall > pts.length * 0.5 || insideOpening(eye, pts)) {
             // whites / iris / highlights fold onto the closed line with the lid (hidden behind it anyway; without
             // this the eye white can peek out at the corners, where the lid barely moves)
+            // (eyeballs that are separate meshes sit well behind the lid: only their corners need it)
+            const cornersOnly = mi !== face;
             const cols = [...eye.top.keys()].filter((i) => isFinite(eye.top[i]));
             if (cols.length) {
               const ex0 = eye.x0 + cols[0] * RES;
@@ -654,8 +656,8 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
                 const p = vtx(m, i);
                 const x = Math.min(ex1, Math.max(ex0, p[0]));
                 const q = openingAt(eye, x);
-                if (!q) continue;
-                const closed = q.bottom + 0.12 * q.gap;
+                if (!q || (cornersOnly && x === p[0] && q.gap > 0.45 * eye.gmax)) continue;
+                const closed = q.bottom - 0.05 * q.gap; // just under the closed line: behind the lower lid
                 const arr = (upper[mi] ??= new Float32Array(m.pos.length));
                 arr[i * 3 + 1] += Math.min(0, closed - p[1]); // (only down: the lower part is the lower lid's)
                 moved++;
@@ -682,7 +684,8 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
               // narrow: otherwise the sides of the eye's outline stay up as strokes), keeping a little thickness.
               const g = lw.top - lw.bottom;
               const closed = lw.bottom + 0.12 * g + 0.4 * Math.max(0, p[1] - lw.top);
-              dy = (closed - p[1]) * (lw.fade ?? 1);
+              const k = smooth(1 - g / (0.6 * eye.gmax)); // 0 in the middle of the eye .. 1 at the corners
+              dy = dy * (1 - k) + (closed - p[1]) * (lw.fade ?? 1) * k;
             }
             // Stay in front of the eyeball along the whole way (the morph moves in a straight line).
             let dz = 0;
