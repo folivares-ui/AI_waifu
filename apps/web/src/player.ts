@@ -20,6 +20,7 @@ export interface Clip {
 export class ClipPlayer {
   private ctx?: AudioContext;
   private analyser?: AnalyserNode;
+  private input?: AudioNode;
   private buf = new Uint8Array(1024);
   /** False on machines/webviews without audio output: callers then fall back to showing/speaking the text. */
   readonly available: boolean;
@@ -36,6 +37,16 @@ export class ClipPlayer {
       this.ctx = new AudioContext();
       this.analyser = this.ctx.createAnalyser();
       this.analyser.fftSize = 1024;
+      // A gentle limiter before the speakers: a sentence the voice engine made too loud is tamed instead of
+      // blasting (the lips read the level after it, so they follow what is heard).
+      const limiter = this.ctx.createDynamicsCompressor();
+      limiter.threshold.value = -14;
+      limiter.knee.value = 8;
+      limiter.ratio.value = 6;
+      limiter.attack.value = 0.004;
+      limiter.release.value = 0.2;
+      this.input = limiter;
+      limiter.connect(this.analyser);
       this.analyser.connect(this.ctx.destination);
     } catch (e) {
       console.warn("No audio output available; voice clips will not play", e);
@@ -83,7 +94,7 @@ export class ClipPlayer {
     this.playing = true;
     const src = this.ctx.createBufferSource();
     src.buffer = item.buffer;
-    src.connect(this.analyser);
+    src.connect(this.input ?? this.analyser);
     src.onended = () => {
       if (this.current === src) this.next();
     };

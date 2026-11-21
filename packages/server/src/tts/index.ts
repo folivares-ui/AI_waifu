@@ -1,3 +1,4 @@
+import { evenOutSpeech } from "./wav.js";
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -157,7 +158,10 @@ export class VoiceStudioTTS extends OpenAICompatibleTTS {
   async synthesize(text: string, opts: TTSOptions, signal?: AbortSignal): Promise<TTSResult> {
     if (this.starting) await this.starting;
     const voice = await this.resolveVoice(opts.voice ?? this.vs.voice);
-    const job = this.queue.then(() => this.withRetry(() => super.synthesize(text, { ...opts, voice }, signal), signal));
+    const job = this.queue
+      .then(() => this.withRetry(() => super.synthesize(text, { ...opts, voice }, signal), signal))
+      // same loudness for every sentence, no silence before the voice (see wav.ts)
+      .then((r) => (r.mime === "audio/wav" ? { ...r, audio: evenOutSpeech(r.audio) } : r));
     this.queue = job.catch(() => {}); // a failed sentence must not block the next ones
     return job;
   }

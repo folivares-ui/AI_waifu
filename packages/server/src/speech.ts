@@ -49,6 +49,10 @@ export function cleanTranslation(s: string): string {
     .replace(/\[[a-z_]+:[^\]]*\]/gi, "")
     .trim()
     .replace(/^["“「『]+|["”」』]+$/g, "")
+    // Voice engines read "！！" / "!!!" (and stretched vowels "ーーー") as shouting: one is enough
+    .replace(/[!！]{2,}/g, "！")
+    .replace(/[?？]{2,}/g, "？")
+    .replace(/ー{2,}/g, "ー")
     .trim();
 }
 
