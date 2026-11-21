@@ -248,6 +248,28 @@ export const LASH_FWD = "_lashFwd";
 /** Where the new lids meet when the eye is shut, as a fraction of its height from the bottom. */
 export const CURTAIN_MEET = 0.35;
 
+/**
+ * How far the upper lid's edge comes down when the eye is shut, at a point along the eye: (1 - CURTAIN_MEET) of
+ * the eye's height there, smoothed along the eye (a 2 mm bell) so the closed line is one even curve and the
+ * lashes on it are carried down without bending, even at the corners where the height changes fast.
+ */
+function shutShift(e: Eye, x: number): number {
+  const cols = [...e.top.keys()].filter((i) => isFinite(e.top[i]));
+  if (!cols.length) return 0;
+  const xc = Math.min(e.x0 + cols[cols.length - 1] * RES, Math.max(e.x0 + cols[0] * RES, x));
+  const sigma = 0.002;
+  let sw = 0;
+  let sv = 0;
+  for (const i of cols) {
+    const d = e.x0 + i * RES - xc;
+    if (Math.abs(d) > 3 * sigma) continue;
+    const w = Math.exp(-(d * d) / (2 * sigma * sigma));
+    sw += w;
+    sv += w * (1 - CURTAIN_MEET) * (e.top[i] - e.bottom[i]);
+  }
+  return sw ? sv / sw : 0;
+}
+
 /** What the app needs to draw the new eyelids of one eye (face frame). */
 export interface CurtainEye {
   face: number;
@@ -261,6 +283,8 @@ export interface CurtainEye {
   skinVertex: number;
   /** Vertices of the face's skin (its texture is continued over the lids). */
   skin: number[];
+  /** Where the lids meet when shut, per column (the same curve the lashes come down to). */
+  meet: number[];
 }
 
 function openingAt(e: Eye, x: number): { top: number; bottom: number; gap: number } | undefined {
@@ -772,8 +796,9 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
               // anime eye drawn closed; the upper lashes become that line, the lower ones tuck under it.
               const g = lw.top - lw.bottom;
               const meet = lw.bottom + CURTAIN_MEET * g;
-              const target = isUpper ? meet + 0.25 * Math.max(0, p[1] - lw.top) : meet - 0.25 * Math.max(0, lw.bottom - p[1]) - 0.001;
-              dy = isUpper ? (target - p[1]) * (lw.fade ?? 1) : 0;
+              void meet;
+              // the upper lashes are carried down whole (no squashing), by the same smooth amount as the lid's edge
+              dy = isUpper ? -shutShift(eye, p[0]) : 0;
               const lf = isUpper ? lidFront(eye) : undefined;
               if (lf !== undefined && p[2] < lf + 0.0008) {
                 const a = (lashFwd[mi] ??= new Float32Array(m.pos.length));
@@ -935,6 +960,7 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
         xs,
         top: tops,
         bottom: bottoms,
+        meet: xs.map((x, k) => Math.max(bottoms[k], Math.min(tops[k], tops[k] - shutShift(eye, x)))),
         gmax: eye.gmax,
         ballZ: (x: number, y: number) => eye.ball.get(x, y),
       };

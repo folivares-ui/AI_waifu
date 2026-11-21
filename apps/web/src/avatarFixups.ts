@@ -126,7 +126,10 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
     const group = { colliders, name: "body" };
     const size = (vrm.humanoid.getRawBoneNode("head")?.getWorldPosition(new THREE.Vector3()).y ?? 1.35) / 0.85; // her height
     for (const root of hairRoots) {
-      for (let o: THREE.Object3D | undefined = root; o; ) {
+      // the first link (around the face, down to the chin) stays with the head: only below it does hair swing,
+      // so strands next to the eyes never wave in front of them
+      const first = root.children.find((c) => /^rig_hair_\d+_\d+$/.test(c.name));
+      for (let o: THREE.Object3D | undefined = first; o; ) {
         const next: THREE.Object3D | undefined = o.children.find((c) => /^rig_hair_\d+_\d+$/.test(c.name));
         if (!next) break; // the last joint is the tip: nothing hangs from it
         mgr.addJoint(new VRMSpringBoneJoint(o, next, { stiffness: 0.55, dragForce: 0.35, gravityPower: 0.35, gravityDir: new THREE.Vector3(0, -1, 0), hitRadius: 0.012 * size }, [group]));

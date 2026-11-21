@@ -102,7 +102,7 @@ export class EyeCurtain {
     const uv = faceMesh.geometry.attributes.uv;
     if (!uv || eyeIn.xs.length < 3) return undefined;
     // a little wider than the opening at both corners (the eye white tapers under the skin there)
-    const eye: CurtainEye = { ...eyeIn, xs: [...eyeIn.xs], top: [...eyeIn.top], bottom: [...eyeIn.bottom] };
+    const eye: CurtainEye = { ...eyeIn, xs: [...eyeIn.xs], top: [...eyeIn.top], bottom: [...eyeIn.bottom], meet: [...eyeIn.meet] };
     const step = 0.001;
     for (const end of [0, 1]) {
       const k = end ? eye.xs.length - 1 : 0;
@@ -111,14 +111,17 @@ export class EyeCurtain {
       for (let j = 1; j <= 3; j++) {
         const x = eye.xs[k] + (end ? 1 : -1) * j * step;
         const h = half * (1 - j / 6); // (the hole's edge is steep at the corners: cover it fully)
+        const m = Math.max(mid - h, Math.min(mid + h, eye.meet[k]));
         if (end) {
           eye.xs.push(x);
           eye.top.push(mid + h);
           eye.bottom.push(mid - h);
+          eye.meet.push(m);
         } else {
           eye.xs.unshift(x);
           eye.top.unshift(mid + h);
           eye.bottom.unshift(mid - h);
+          eye.meet.unshift(m);
         }
       }
     }
@@ -174,7 +177,8 @@ export class EyeCurtain {
       const p = mesh.geometry.attributes.position as THREE.BufferAttribute;
       e.xs.forEach((x, c) => {
         const gap = e.top[c] - e.bottom[c];
-        const meet = e.bottom[c] + CURTAIN_MEET * gap;
+        const meet = e.meet[c];
+        void CURTAIN_MEET;
         const edge = fromTop ? e.top[c] : e.bottom[c];
         // starts a little behind the edge of the opening, so no seam shows between skin and lid
         const start = edge + (fromTop ? 1 : -1) * Math.min(0.002, 0.08 * gap);
