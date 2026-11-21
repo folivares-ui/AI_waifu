@@ -104,11 +104,17 @@ describe("synthesized lids and jaw (models without eyelid or jaw bones)", () => 
     expect(res.info.gap[0]).toBeLessThan(0.02);
     expect(res.info.mouthWidth).toBeGreaterThan(0.02);
   });
-  it("the upper lid closes down to the lower one and the eyeball itself never moves", () => {
+  it("the upper lid closes down to the lower one; the eyeball only folds down behind it", () => {
     const rim = vertex(meshes[0], 0.02, 0.024); // first skin vertex above the opening, in the middle
     const dy = res.upper[0]![rim * 3 + 1];
     expect(dy).toBeLessThan(-0.012);
-    expect(res.upper[1]?.some((v) => v !== 0) ?? false).toBe(false);
+    // the eyeball folds onto the closed line (hidden by the lid): never up, never sideways or in depth
+    const ball = res.upper[1]!;
+    for (let i = 0; i < ball.length; i += 3) {
+      expect(ball[i + 1]).toBeLessThanOrEqual(0.0005);
+      expect(ball[i]).toBe(0);
+      expect(ball[i + 2]).toBe(0);
+    }
     // far above the eye nothing moves
     expect(res.upper[0]![vertex(meshes[0], 0.02, 0.038) * 3 + 1]).toBe(0);
   });

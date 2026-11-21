@@ -5,7 +5,7 @@ import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 import type { Emotion, LookStyle, MotionStyle, TouchRegion } from "@waifu/core";
 import { addSpringChains, faceFraming, fullFraming, hideHelperMeshes, setToonBrightness, toonify } from "./avatarFixups";
 import { collectParts } from "./modelParts";
-import { BODY_BONES, bodyPose } from "./bodyMotion";
+import { BODY_BONES, FINGER_NAMES, FINGER_SEGMENT_BEND, bodyPose, fingerCurl } from "./bodyMotion";
 import { solveArmPoses, type ArmSolutions } from "./armIK";
 import { TorsoGuard } from "./torsoGuard";
 import { measureArmLift } from "./restPose";
@@ -127,6 +127,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
     canvas.addEventListener("pointermove", onPointerMove);
     // She waves back when you wave at the camera.
     let waveStart = -10;
+    const fingerState = new Map<string, number>();
     const onWave = () => (waveStart = timer.getElapsed());
     window.addEventListener("waifu:avatar-wave", onWave);
     canvas.addEventListener("pointerleave", onPointerLeave);
@@ -365,6 +366,28 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         st[2] = step(st[2], e[2] * armK + extra);
         poseState.set(name, st);
         b.rotation.set(st[0], st[1], st[2]);
+      }
+      // Fingers: curled by mood, bending towards the palm (normalized bones: about z, opposite sign per hand).
+      {
+        const curl = fingerCurl({ t, emotion: bodyEmotion, speaking: p.speaking, level: voiceLevelSmooth, waving: t - waveStart < 2.4 });
+        for (const side of ["left", "right"] as const) {
+          const dir = (side === "left" ? -1 : 1) * armK;
+          for (const f of FINGER_NAMES) {
+            const segs = f === "Thumb" ? (["Metacarpal", "Proximal", "Distal"] as const) : (["Proximal", "Intermediate", "Distal"] as const);
+            for (const g of segs) {
+              const b = vrm.humanoid.getNormalizedBoneNode(`${side}${f}${g}` as never);
+              if (!b) continue;
+              const to = curl[f] * FINGER_SEGMENT_BEND[g] * (f === "Thumb" ? 0.45 : 1);
+              const key = `${side}${f}${g}`;
+              const cur = fingerState.get(key) ?? 0;
+              const next = cur + (to - cur) * Math.min(1, dt * 6);
+              fingerState.set(key, next);
+              // the thumb folds across the palm (about y), the others towards it (about z)
+              if (f === "Thumb") b.rotation.set(0, -dir * next * 0.6, dir * next * 0.5);
+              else b.rotation.set(0, 0, dir * next);
+            }
+          }
+        }
       }
       // Waving back: right arm up, forearm swinging, for ~2.4 s (blended over her current pose).
       const wk = envelope(t, waveStart, waveStart + 1.6, 0.35, 0, 0.5);

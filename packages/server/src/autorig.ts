@@ -157,7 +157,7 @@ function appendBin(json: RigGltf, bin: Buffer, data: Buffer): { bin: Buffer; off
 // ---------- geometry helpers ----------
 
 interface Piece {
-  prim: { mesh: number; prim: number; node: number };
+  prim: { mesh: number; prim: number; node: number; pos: V3[] };
   verts: number[];
   top: number;
   bottom: number;
@@ -248,12 +248,42 @@ function fitLine(pts: V3[]): { c: V3; d: V3 } {
   return { c, d };
 }
 
+/** How a vertex past the wrist splits between the hand and the finger segments. */
+function fingerWeights(f: NonNullable<ReturnType<typeof fingersOf>>, wrist: V3, p: V3): { hand: number; bones: [string, number][] } {
+  const q = sub(p, wrist);
+  const t = dot(q, f.u);
+  const wv = dot(q, f.w);
+  const L = f.L;
+  const seg = (x: number, a: number, b: number, c: number, names: [string, string, string]): [string, number][] => {
+    // blend smoothly across each joint (+-3% of the hand)
+    const k1 = smooth((x - a + 0.03 * L) / (0.06 * L));
+    const k2 = smooth((x - b + 0.03 * L) / (0.06 * L));
+    const k3 = smooth((x - c + 0.03 * L) / (0.06 * L));
+    return [[names[0], k1 * (1 - k2)], [names[1], k2 * (1 - k3)], [names[2], k3]];
+  };
+  if (f.thumb && wv > f.thumbEdge && t < 0.75 * L) {
+    const s = dot(sub(p, f.thumb.base), f.thumb.dir) / (f.thumb.len || 1);
+    const bones = seg(s, 0.1, 0.45, 0.72, ["ThumbMetacarpal", "ThumbProximal", "ThumbDistal"]).filter(([, x]) => x > 0);
+    const used = bones.reduce((a, [, x]) => a + x, 0);
+    return { hand: 1 - Math.min(1, used), bones };
+  }
+  const k = f.centers.reduce((b, c, j) => (Math.abs(wv - c) < Math.abs(wv - f.centers[b]) ? j : b), 0);
+  const name = FINGERS[k];
+  const bones = seg(t, 0.45 * L, 0.66 * L, 0.82 * L, [`${name}Proximal`, `${name}Intermediate`, `${name}Distal`]).filter(([, x]) => x > 0);
+  const used = bones.reduce((a, [, x]) => a + x, 0);
+  return { hand: 1 - Math.min(1, used), bones };
+}
+
 // ---------- the rig ----------
 
 export const RIG_BONES = [
   "hips", "spine", "chest", "upperChest", "neck", "head", "leftEye", "rightEye",
   "leftShoulder", "leftUpperArm", "leftLowerArm", "leftHand", "rightShoulder", "rightUpperArm", "rightLowerArm", "rightHand",
   "leftUpperLeg", "leftLowerLeg", "leftFoot", "leftToes", "rightUpperLeg", "rightLowerLeg", "rightFoot", "rightToes",
+  ...(["left", "right"] as const).flatMap((s) => [
+    `${s}ThumbMetacarpal`, `${s}ThumbProximal`, `${s}ThumbDistal`,
+    ...(["Index", "Middle", "Ring", "Little"] as const).flatMap((f) => [`${s}${f}Proximal`, `${s}${f}Intermediate`, `${s}${f}Distal`] as const),
+  ] as const),
 ] as const;
 type Bone = (typeof RIG_BONES)[number];
 const PARENT: Partial<Record<Bone, Bone>> = {
@@ -263,6 +293,79 @@ const PARENT: Partial<Record<Bone, Bone>> = {
   leftUpperLeg: "hips", leftLowerLeg: "leftUpperLeg", leftFoot: "leftLowerLeg", leftToes: "leftFoot",
   rightUpperLeg: "hips", rightLowerLeg: "rightUpperLeg", rightFoot: "rightLowerLeg", rightToes: "rightFoot",
 };
+for (const s of ["left", "right"] as const) {
+  for (const f of ["Thumb", "Index", "Middle", "Ring", "Little"] as const) {
+    const segs = f === "Thumb" ? ["Metacarpal", "Proximal", "Distal"] : ["Proximal", "Intermediate", "Distal"];
+    segs.forEach((g, k) => (PARENT[`${s}${f}${g}` as Bone] = (k === 0 ? `${s}Hand` : `${s}${f}${segs[k - 1]}`) as Bone));
+  }
+}
+
+const FINGERS = ["Index", "Middle", "Ring", "Little"] as const;
+
+/**
+ * Fingers of one hand, from the shape of the mesh beyond the wrist. Hand frame: u along the arm, w across the hand
+ * (the fingers lie side by side along it; +w is the thumb's side, towards the front), n the third axis. The four
+ * fingers are the four bands of vertices along w near the fingertips; the thumb is what lies beyond the index on
+ * the thumb's side, closer to the wrist.
+ */
+function fingersOf(pts: V3[], wrist: V3, u: V3) {
+  const rel = pts.map((p) => sub(p, wrist));
+  const ts = rel.map((q) => dot(q, u));
+  const L = Math.max(...ts);
+  if (!(L > 0.02)) return undefined;
+  // width axis: main spread of the hand across the arm; its sign towards the front (+z), where the thumb is
+  const perp = rel.map((q, i) => sub(q, scale(u, ts[i])));
+  let w = fitLine(perp.map((q) => q)).d;
+  if (w[2] < 0) w = scale(w, -1);
+  const n: V3 = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+  const ws = perp.map((q) => dot(q, w));
+  const ns = perp.map((q) => dot(q, n));
+  // the four fingers near their tips (the thumb is shorter)
+  const tipIdx = ts.map((t, i) => i).filter((i) => ts[i] > 0.7 * L && ts[i] < 0.96 * L);
+  if (tipIdx.length < 12) return undefined;
+  const wsTip = tipIdx.map((i) => ws[i]);
+  let lo = Math.min(...wsTip), hi = Math.max(...wsTip);
+  let centers = [0, 1, 2, 3].map((k) => hi - ((k + 0.5) / 4) * (hi - lo)); // index (thumb side) first
+  for (let it = 0; it < 12; it++) {
+    const sums = centers.map(() => [0, 0]);
+    for (const i of tipIdx) {
+      const k = centers.reduce((b, c, j) => (Math.abs(ws[i] - c) < Math.abs(ws[i] - centers[b]) ? j : b), 0);
+      sums[k][0] += ws[i];
+      sums[k][1]++;
+    }
+    centers = centers.map((c, k) => (sums[k][1] ? sums[k][0] / sums[k][1] : c));
+  }
+  const nMean = (k: number) => {
+    const sel = tipIdx.filter((i) => centers.reduce((b, c, j) => (Math.abs(ws[i] - c) < Math.abs(ws[i] - centers[b]) ? j : b), 0) === k);
+    return sel.length ? sel.reduce((s, i) => s + ns[i], 0) / sel.length : 0;
+  };
+  const at = (t: number, wv: number, nv: number): V3 => add(add(add(wrist, scale(u, t)), scale(w, wv)), scale(n, nv));
+  const joints: Record<string, V3> = {};
+  const spacing = Math.abs(centers[0] - centers[3]) / 3 || 0.01;
+  FINGERS.forEach((f, k) => {
+    const nk = nMean(k);
+    joints[`${f}Proximal`] = at(0.45 * L, centers[k], nk);
+    joints[`${f}Intermediate`] = at(0.66 * L, centers[k], nk);
+    joints[`${f}Distal`] = at(0.82 * L, centers[k], nk);
+  });
+  // thumb: beyond the index on the thumb's side, in the first part of the hand
+  const thumbEdge = centers[0] + 0.6 * spacing;
+  const thumbIdx = ts.map((t, i) => i).filter((i) => ws[i] > thumbEdge && ts[i] < 0.75 * L);
+  let thumb: { base: V3; dir: V3; len: number } | undefined;
+  if (thumbIdx.length >= 8) {
+    const tp = thumbIdx.map((i) => pts[i]);
+    let { c, d } = fitLine(tp);
+    if (dot(d, u) < 0) d = scale(d, -1); // from the wrist out
+    const proj = tp.map((p) => dot(sub(p, c), d));
+    const a = Math.min(...proj), b = Math.max(...proj);
+    const base = add(c, scale(d, a));
+    thumb = { base, dir: d, len: b - a };
+    joints.ThumbMetacarpal = add(base, scale(d, 0.1 * (b - a)));
+    joints.ThumbProximal = add(base, scale(d, 0.45 * (b - a)));
+    joints.ThumbDistal = add(base, scale(d, 0.72 * (b - a)));
+  }
+  return { L, w, n, centers, thumbEdge, thumb, joints, u };
+}
 
 export interface RigResult {
   json: RigGltf;
@@ -313,6 +416,17 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
   };
   const armL = armLine(1); // +x: her left (facing +z)
   const armR = armLine(-1);
+  // Hands: what lies beyond the wrist along the arm (close to its line).
+  const handOf = (a: ReturnType<typeof armLine>) => {
+    const pts = all.filter((p) => {
+      const t = dot(sub(p, a.wrist), a.d);
+      const r = len(sub(sub(p, a.wrist), scale(a.d, t)));
+      return t > -0.005 * H && t < 0.14 * H && r < 0.06 * H;
+    });
+    return pts.length > 30 ? fingersOf(pts, a.wrist, a.d) : undefined;
+  };
+  const handL = handOf(armL);
+  const handR = handOf(armR);
   const shoulderY = (armL.shoulder[1] + armR.shoulder[1]) / 2;
 
   // Legs: below the hem the legs stand apart. Where something covers the middle (skirt or crotch) they end.
@@ -362,6 +476,11 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
     neck: at(neckY, 0.03 * H),
     head: at(headY, 0.05 * H),
   };
+  for (const [s, hnd] of [["left", handL], ["right", handR]] as const) {
+    if (!hnd) continue;
+    for (const [k, v] of Object.entries(hnd.joints)) J[`${s}${k}`] = v;
+    if (!hnd.thumb) for (const g of ["Metacarpal", "Proximal", "Distal"]) delete J[`${s}Thumb${g}`];
+  }
   for (const [s, a, l] of [["left", armL, legL], ["right", armR, legR]] as const) {
     const side = s === "left" ? 1 : -1;
     J[`${s}Shoulder`] = [cx + side * 0.025 * H, shoulderY - 0.005 * H, J.upperChest[2]];
@@ -420,13 +539,85 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
     J.rightEye = [eyePair[1][0], eyePair[1][1], eyePair[1][2] - 0.012 * H];
   }
 
-  const bones = RIG_BONES.filter((b) => J[b]);
+  // Hair that hangs below the neck: chains of bones around the head (one every 36 degrees where there is hair),
+  // so it can swing (spring physics in the app). Short hair and the face stay with the head.
+  const hairPiece = (pc: { headPart: boolean; bottom: number }) => pc.headPart && pc.bottom < neckY;
+  const rootY = J.head[1] + 0.04 * H; // about ear height: above it the hair lies on the head
+  const hc = J.head;
+  const angleOf = (p: V3) => Math.atan2(p[0] - hc[0], p[2] - hc[2]);
+  const BINS = 10;
+  const binOf = (a: number) => ((Math.floor(((a + Math.PI) / (2 * Math.PI)) * BINS) % BINS) + BINS) % BINS;
+  const hairPts: V3[][] = Array.from({ length: BINS }, () => []);
+  for (const pc of allPieces) {
+    if (!hairPiece(pc)) continue;
+    for (const i of pc.verts) {
+      const v = pc.prim.pos[i];
+      if (v[1] < rootY) hairPts[binOf(angleOf(v))].push(v);
+    }
+  }
+  const chains: { bin: number; names: string[]; ys: number[] }[] = [];
+  const PARENTS: Record<string, string> = { ...(PARENT as Record<string, string>) };
+  hairPts.forEach((pts, bin) => {
+    if (pts.length < 30) return;
+    const bottom = Math.min(...pts.map((v) => v[1]));
+    if (rootY - bottom < 0.06 * H) return;
+    const ys = [0, 0.33, 0.66, 0.95].map((f) => rootY - f * (rootY - bottom));
+    const names: string[] = [];
+    let prev: V3 | undefined;
+    ys.forEach((y, k) => {
+      const near = pts.filter((v) => Math.abs(v[1] - y) < 0.03 * H);
+      const at: V3 = near.length
+        ? [near.reduce((a, v) => a + v[0], 0) / near.length, y, near.reduce((a, v) => a + v[2], 0) / near.length]
+        : prev ? [prev[0], y, prev[2]] : [hc[0], y, hc[2]];
+      const name = `hair_${bin}_${k}`;
+      J[name] = at;
+      PARENTS[name] = k === 0 ? "head" : `hair_${bin}_${k - 1}`;
+      names.push(name);
+      prev = at;
+    });
+    chains.push({ bin, names, ys });
+  });
+  const hairBones = chains.flatMap((c) => c.names);
+
+  const bones = [...RIG_BONES.filter((b) => J[b]), ...hairBones];
   const bi = new Map<string, number>(bones.map((b, i) => [b, i]));
 
   // ---------- weights ----------
-  const weightsOf = (p: V3, headPart: boolean): [string, number][] => {
+  const weightsOf = (p: V3, part: number): [string, number][] => {
+    const headPart = part > 0;
     const w = new Map<string, number>();
     const put = (b: string, v: number) => v > 0 && w.set(b, (w.get(b) ?? 0) + v);
+    if (part === 2 && chains.length && p[1] < rootY + 0.02 * H) {
+      // hanging hair: the two nearest chains around the head, and along each chain by height
+      const a = angleOf(p);
+      const angDist = (c: { bin: number }) => {
+        const mid = -Math.PI + ((c.bin + 0.5) / BINS) * 2 * Math.PI;
+        let d = Math.abs(a - mid);
+        if (d > Math.PI) d = 2 * Math.PI - d;
+        return d;
+      };
+      const near = [...chains].sort((x, y) => angDist(x) - angDist(y)).slice(0, 2);
+      const d0 = angDist(near[0]);
+      const d1 = near[1] ? angDist(near[1]) : Infinity;
+      const w0 = near[1] ? d1 / (d0 + d1 || 1) : 1;
+      const root = smooth((rootY + 0.02 * H - p[1]) / (0.04 * H)); // blends in from the head
+      put("head", 1 - root);
+      near.forEach((c, ci) => {
+        const k = ci === 0 ? w0 : 1 - w0;
+        const ys = c.ys;
+        if (p[1] >= ys[0]) return put(c.names[0], root * k);
+        for (let j = 0; j < ys.length - 1; j++) {
+          if (p[1] >= ys[j + 1]) {
+            const t = (ys[j] - p[1]) / (ys[j] - ys[j + 1] || 1);
+            put(c.names[j], root * k * (1 - t));
+            put(c.names[j + 1], root * k * t);
+            return;
+          }
+        }
+        put(c.names[ys.length - 1], root * k);
+      });
+      return [...w];
+    }
     if (headPart) {
       // long hair below the neck follows the chest more and more (but stays mostly the head's: it is not body)
       const a = 0.45 * smooth((neckY - p[1]) / (0.15 * H));
@@ -466,7 +657,12 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
       const h = smooth((t - tW + 0.012 * H) / (0.024 * H));
       put(`${s}UpperArm`, toArm * (1 - e));
       put(`${s}LowerArm`, toArm * e * (1 - h));
-      put(`${s}Hand`, toArm * h);
+      const fingers = (s === "left" ? handL : handR);
+      const fw = fingers ? fingerWeights(fingers, a.wrist, p) : undefined;
+      if (fw) {
+        put(`${s}Hand`, toArm * h * fw.hand);
+        for (const [b, x] of fw.bones) put(`${s}${b}`, toArm * h * x);
+      } else put(`${s}Hand`, toArm * h);
       if (toArm < 1) {
         put(`${s}Shoulder`, (1 - toArm) * 0.6);
         spine((1 - toArm) * 0.4);
@@ -508,14 +704,14 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
   const firstJoint = json.nodes.length;
   const nodeOf = (b: string) => firstJoint + bi.get(b)!;
   bones.forEach((b) => {
-    const parent = PARENT[b];
+    const parent = PARENTS[b];
     const pw = parent ? J[parent] : undefined;
     // joints have no rotation: their local offset is the world offset brought into the parent's (root's) frame
     const local = pw ? apply(rootInv, J[b]).map((v, k) => v - apply(rootInv, pw)[k]) : apply(rootInv, J[b]);
     json.nodes.push({ name: `rig_${b}`, translation: local });
   });
   bones.forEach((b) => {
-    const parent = PARENT[b];
+    const parent = PARENTS[b];
     if (parent) (json.nodes[nodeOf(parent)].children ??= []).push(nodeOf(b));
   });
   (json.nodes[rootIdx].children ??= []).push(nodeOf("hips"));
@@ -549,12 +745,12 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
       skins.set(p.node, json.skins.length - 1);
       json.nodes[p.node].skin = json.skins.length - 1;
     }
-    const isHead = new Uint8Array(p.pos.length);
-    for (const pc of allPieces) if (pc.prim === p && pc.headPart) for (const i of pc.verts) isHead[i] = 1;
+    const part = new Uint8Array(p.pos.length); // 0 body, 1 head, 2 hanging hair
+    for (const pc of allPieces) if (pc.prim === p && pc.headPart) for (const i of pc.verts) part[i] = hairPiece(pc) ? 2 : 1;
     const jb = Buffer.alloc(p.pos.length * 8);
     const wb = Buffer.alloc(p.pos.length * 16);
     p.pos.forEach((v, i) => {
-      const ws = weightsOf(v, !!isHead[i]).sort((a, b) => b[1] - a[1]).slice(0, 4);
+      const ws = weightsOf(v, part[i]).sort((a, b) => b[1] - a[1]).slice(0, 4);
       const total = ws.reduce((s, [, x]) => s + x, 0) || 1;
       if (!ws.length) ws.push(["hips", 1]);
       ws.forEach(([b, x], k) => {
@@ -566,5 +762,6 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
     prim.attributes.JOINTS_0 = addAccessor(jb, { componentType: 5123, count: p.pos.length, type: "VEC4" });
     prim.attributes.WEIGHTS_0 = addAccessor(wb, { componentType: 5126, count: p.pos.length, type: "VEC4" });
   }
-  return { json, bin, humanBones: Object.fromEntries(bones.map((b) => [b, nodeOf(b)])), joints: J as Record<string, V3> };
+  const human = new Set<string>(RIG_BONES);
+  return { json, bin, humanBones: Object.fromEntries(bones.filter((b) => human.has(b)).map((b) => [b, nodeOf(b)])), joints: J as Record<string, V3> };
 }

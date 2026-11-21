@@ -197,6 +197,24 @@ class Grid {
 
 const smooth = (t: number) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 
+/**
+ * An eyebrow: a long thin piece above the eye (clear of the lashes), over it. Lashes can reach as high, but each
+ * strand is narrow.
+ */
+function isBrow(e: Eye, pts: V3[], minAbove = 0.05): boolean {
+  const cols = [...e.top.keys()].filter((i) => isFinite(e.top[i]));
+  if (!cols.length) return false;
+  const x0 = e.x0 + cols[0] * RES;
+  const x1 = e.x0 + cols[cols.length - 1] * RES;
+  const top = openingAt(e, (x0 + x1) / 2)!.top;
+  const { mn, mx } = bbox(pts);
+  const cx = (mn[0] + mx[0]) / 2;
+  const w = mx[0] - mn[0];
+  if (mn[1] < top + minAbove * e.gmax || mx[1] > top + 2.6 * e.gmax) return false;
+  if (cx < x0 - 0.2 * (x1 - x0) || cx > x1 + 0.2 * (x1 - x0)) return false;
+  return w >= 0.45 * (x1 - x0) && mx[1] - mn[1] <= 0.45 * w;
+}
+
 /** The skin of a face mesh: its biggest piece (eyes, lashes, teeth... may be pieces of the same mesh). */
 const skinOf = (comps: number[][]) => comps.reduce((a, b) => (b.length > a.length ? b : a));
 
@@ -227,7 +245,12 @@ function findEye(meshes: FaceMeshIn[], comps: number[][][], center: V3, midX?: n
   // usually inside it; in some rigs it sits off it (at the back of the eyeball), so the nearest hole close by.
   let best: { loop: V3[]; mesh: number; area: number; d: number; front: number; size: number } | undefined;
   meshes.forEach((m, mi) => {
-    for (const loop of boundaryLoops(m)) {
+    // holes of the skin itself (its biggest piece): the outlines of eye pieces kept in the same mesh (eye white,
+    // eyeliner) are loops around the eye too, but smaller than the real opening
+    const skin = new Set(skinOf(comps[mi]));
+    const skinIndex: number[] = [];
+    for (let t = 0; t < m.index.length; t += 3) if (skin.has(m.index[t])) skinIndex.push(m.index[t], m.index[t + 1], m.index[t + 2]);
+    for (const loop of boundaryLoops({ ...m, index: skinIndex })) {
       const { mn, mx } = bbox(loop);
       const w = mx[0] - mn[0];
       const h = mx[1] - mn[1];
@@ -305,7 +328,24 @@ function findEye(meshes: FaceMeshIn[], comps: number[][][], center: V3, midX?: n
   let gmax = 0;
   for (let i = 0; i < skin.nx; i++) if (isFinite(top[i])) gmax = Math.max(gmax, top[i] - bottom[i]);
   if (gmax < 0.003) return undefined;
-  for (let i = 0; i < skin.nx; i++) if (!(top[i] - bottom[i] >= gmax * 0.25)) top[i] = bottom[i] = NaN;
+  for (let i = 0; i < skin.nx; i++) if (!(top[i] - bottom[i] >= gmax * 0.08)) top[i] = bottom[i] = NaN; // (corners included)
+  // The very corners (a few mm where the eye white tapers under the skin's edge) close too: extend each end,
+  // narrowing to nothing.
+  const valid = [...top.keys()].filter((i) => isFinite(top[i]));
+  if (valid.length) {
+    const ext = Math.round(0.007 / RES);
+    for (const [edge, dir] of [[valid[0], -1], [valid[valid.length - 1], 1]] as const) {
+      const mid = (top[edge] + bottom[edge]) / 2;
+      const half = (top[edge] - bottom[edge]) / 2;
+      for (let k = 1; k <= ext; k++) {
+        const i = edge + dir * k;
+        if (i < 0 || i >= skin.nx || isFinite(top[i])) continue;
+        const f = 1 - k / (ext + 1);
+        top[i] = mid + half * f;
+        bottom[i] = mid - half * f;
+      }
+    }
+  }
   const eye: Eye = { x0: gx0, top, bottom, gmax, ball: new Grid(gx0, gy0 - 0.01, gx1, gy1 + 0.01, true) };
 
   // 4. Eyeball pieces (their surface is the back-most layer, in the middle of the opening), to keep lids in front.
@@ -357,18 +397,31 @@ function eyeballPiece(e: Eye, pts: V3[], back: Grid): boolean {
 }
 
 /** How far down (upper lid) or up (lower lid) a vertex moves when the lid travels its whole way, 0..1 times the gap. */
-function lidWeight(e: Eye, p: V3, upper: boolean, rigid: boolean): { w: number; gap: number; inside: number } {
-  const o = openingAt(e, p[0]);
-  if (!o) return { w: 0, gap: 0, inside: 0 };
+function lidWeight(e: Eye, p: V3, upper: boolean, rigid: boolean): { w: number; gap: number; inside: number; top?: number; bottom?: number; fade?: number } {
+  let o = openingAt(e, p[0]);
+  let fade = 1;
+  if (!o && rigid) {
+    // a lash that runs past the corner (the outer flick): it follows the nearest edge of the lid, fading out
+    const cols = [...e.top.keys()].filter((i) => isFinite(e.top[i]));
+    if (cols.length) {
+      const x0 = e.x0 + cols[0] * RES;
+      const x1 = e.x0 + cols[cols.length - 1] * RES;
+      const x = Math.min(x1, Math.max(x0, p[0]));
+      o = openingAt(e, x);
+      fade = smooth(1 - Math.abs(p[0] - x) / (0.5 * (x1 - x0)));
+    }
+  }
+  if (!o || fade <= 0) return { w: 0, gap: 0, inside: 0 };
   const mid = (o.top + o.bottom) / 2;
   if (upper ? p[1] < mid : p[1] >= mid) return { w: 0, gap: 0, inside: 0 };
   const h = upper ? p[1] - o.top : o.bottom - p[1]; // height above the upper edge / below the lower one
   // The lid itself (rim, lashes and the skin just above them) moves as one piece; above it the skin stretches
   // up to `reach`, where it no longer moves. (Moving only the rim would uncover the eyeball behind the lid.)
-  const lid = (upper ? 0.3 : 0.15) * e.gmax;
-  const reach = (upper ? 0.6 : 0.4) * e.gmax;
+  // (capped in mm: anime eyes can be huge, and stretching skin that far would drag the eyebrow down with it)
+  const lid = Math.min((upper ? 0.3 : 0.15) * e.gmax, upper ? 0.006 : 0.003);
+  const reach = Math.min((upper ? 0.6 : 0.4) * e.gmax, upper ? 0.012 : 0.008);
   const inside = Math.max(0, -h); // how far into the opening it already is
-  if (rigid) return { w: h < reach ? 1 : 0, gap: o.gap, inside };
+  if (rigid) return { w: h < reach * 2.2 ? fade : 0, gap: o.gap * fade, inside: inside * fade, top: o.top, bottom: o.bottom, fade };
   return { w: h <= lid ? 1 : Math.max(0, 1 - (h - lid) / (reach - lid)), gap: o.gap, inside };
 }
 
@@ -514,16 +567,25 @@ function eyebrows(
     const ex = (x0 + x1) / 2;
     const top = openingAt(eye, ex)!.top;
     const unit = Math.max(0.003, Math.min(0.007, 0.38 * eye.gmax));
+    // the eyebrow is the highest long thin piece above the eye (a crease line drawn over the lid is lower)
+    let brow: { mi: number; c: number[]; y: number } | undefined;
     meshes.forEach((m, mi) => {
       for (const c of comps[mi]) {
         if (mi === face && c === skinOf(comps[mi])) continue; // the face skin itself
         const pts = c.map((i) => vtx(m, i));
+        if (!isBrow(eye, pts)) continue;
+        if (c.filter((i) => m.onHead[i]).length < c.length * 0.6) continue;
+        const y = bbox(pts).mn[1];
+        if (!brow || y > brow.y) brow = { mi, c, y };
+      }
+    });
+    if (brow) {
+      const { mi, c } = brow;
+      const m = meshes[mi];
+      {
+        const pts = c.map((i) => vtx(m, i));
         const { mn, mx } = bbox(pts);
         const cx = (mn[0] + mx[0]) / 2;
-        // above the eye (clear of the lashes), over it, elongated
-        if (mn[1] < top + 0.35 * eye.gmax || mx[1] > top + 2.6 * eye.gmax) continue;
-        if (cx < x0 - 0.2 * (x1 - x0) || cx > x1 + 0.2 * (x1 - x0) || mx[0] - mn[0] < 0.4 * (x1 - x0) || mx[1] - mn[1] > 0.6 * (mx[0] - mn[0])) continue;
-        if (c.filter((i) => m.onHead[i]).length < c.length * 0.6) continue;
         const inner = Math.min(Math.abs(mn[0] - midX), Math.abs(mx[0] - midX));
         const outer = Math.max(Math.abs(mn[0] - midX), Math.abs(mx[0] - midX));
         const inward = cx > midX ? -1 : 1; // towards the nose
@@ -540,7 +602,7 @@ function eyebrows(
           moved++;
         }
       }
-    });
+    }
   }
   return moved;
 }
@@ -581,18 +643,47 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
             const b = eye.ball.get(p[0], p[1]);
             return b !== undefined && p[2] <= b + 0.0005;
           }).length;
-          if (onBall > pts.length * 0.5 || insideOpening(eye, pts)) continue; // whites / iris / highlights
-          if (mn[1] > o.top + 0.3 * eye.gmax) continue; // above the lid: eyebrow
+          if (onBall > pts.length * 0.5 || insideOpening(eye, pts)) {
+            // whites / iris / highlights fold onto the closed line with the lid (hidden behind it anyway; without
+            // this the eye white can peek out at the corners, where the lid barely moves)
+            const cols = [...eye.top.keys()].filter((i) => isFinite(eye.top[i]));
+            if (cols.length) {
+              const ex0 = eye.x0 + cols[0] * RES;
+              const ex1 = eye.x0 + cols[cols.length - 1] * RES;
+              for (const i of c) {
+                const p = vtx(m, i);
+                const x = Math.min(ex1, Math.max(ex0, p[0]));
+                const q = openingAt(eye, x);
+                if (!q) continue;
+                const closed = q.bottom + 0.12 * q.gap;
+                const arr = (upper[mi] ??= new Float32Array(m.pos.length));
+                arr[i * 3 + 1] += Math.min(0, closed - p[1]); // (only down: the lower part is the lower lid's)
+                moved++;
+              }
+            }
+            continue;
+          }
+          // the eyebrow (it has its own channels) and the crease line drawn above the lid stay where they are
+          if (isBrow(eye, pts, 0.03)) continue;
+          if (mn[1] > o.top + 1.3 * eye.gmax) continue; // well above the eye: not part of the lid
           rigid = true;
         }
         for (const i of c) {
           const p = vtx(m, i);
           for (const [target, isUpper] of [[upper, true], [lower, false]] as const) {
-            const { w, gap, inside } = lidWeight(eye, p, isUpper, rigid);
+            const lw = lidWeight(eye, p, isUpper, rigid);
+            const { w, gap, inside } = lw;
             if (w <= 0 || gap <= 0) continue;
             // Whatever hangs into the opening (the lid's own rim, the lower strip of the lashes) ends up squashed
             // against the closed lid line instead of sticking out below it.
-            const dy = (isUpper ? -1 : 1) * (inside > 0 ? gap - 0.85 * inside : w * gap);
+            let dy = (isUpper ? -1 : 1) * (inside > 0 ? gap - 0.85 * inside : w * gap);
+            if (rigid && isUpper && lw.top !== undefined && lw.bottom !== undefined) {
+              // Upper lashes and eyeliner all gather on the closed line (also at the corners, where the opening is
+              // narrow: otherwise the sides of the eye's outline stay up as strokes), keeping a little thickness.
+              const g = lw.top - lw.bottom;
+              const closed = lw.bottom + 0.12 * g + 0.4 * Math.max(0, p[1] - lw.top);
+              dy = (closed - p[1]) * (lw.fade ?? 1);
+            }
             // Stay in front of the eyeball along the whole way (the morph moves in a straight line).
             let dz = 0;
             const startsVisible = (eye.ball.get(p[0], p[1]) ?? -Infinity) + 0.0008 <= p[2];
@@ -839,7 +930,40 @@ export class SynthFace {
       const byMesh = new Map<number, number>();
       for (const b of res.brows) byMesh.set(b.mesh, (byMesh.get(b.mesh) ?? 0) + b.verts.length);
       for (const [mi, n] of byMesh) {
-        if (n !== inputs[mi].pos.length / 3) continue; // shares its mesh with other parts: leave it as it is
+        if (n !== inputs[mi].pos.length / 3) {
+          // The eyebrows are part of a bigger mesh (the face): draw a copy of just their triangles over the hair,
+          // sharing the skeleton and the morph targets (it is moved with the same influences).
+          const src = used[mi];
+          const verts = new Set(res.brows.filter((b) => b.mesh === mi).flatMap((b) => b.verts));
+          const index = src.geometry.index!;
+          const tris: number[] = [];
+          for (let t = 0; t < index.count; t += 3) {
+            const a = index.getX(t), b = index.getX(t + 1), c = index.getX(t + 2);
+            if (verts.has(a) && verts.has(b) && verts.has(c)) tris.push(a, b, c);
+          }
+          if (!tris.length) continue;
+          const geo = src.geometry.clone();
+          geo.setIndex(tris);
+          geo.clearGroups();
+          const mat = [src.material].flat()[0].clone();
+          mat.depthTest = false;
+          mat.depthWrite = false;
+          mat.transparent = true;
+          const overlay = new THREE.SkinnedMesh(geo, mat);
+          overlay.name = `${src.name} eyebrows`;
+          overlay.position.copy(src.position);
+          overlay.quaternion.copy(src.quaternion);
+          overlay.scale.copy(src.scale);
+          overlay.renderOrder = 100;
+          overlay.frustumCulled = false;
+          src.parent?.add(overlay);
+          overlay.bind(src.skeleton, src.bindMatrix);
+          overlay.updateMorphTargets();
+          const slot = slots.find((sl) => sl.mesh === src);
+          if (slot) slots.push({ ...slot, mesh: overlay, extra: [...slot.extra] });
+          face.browsOnTop++;
+          continue;
+        }
         const m = used[mi];
         for (const mat of [m.material].flat()) {
           mat.depthTest = false;

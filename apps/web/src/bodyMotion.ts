@@ -204,3 +204,28 @@ export function bodyPose(s: BodyState): BodyPose {
   }
   return pose;
 }
+
+// ---------- fingers ----------
+
+export const FINGER_NAMES = ["Thumb", "Index", "Middle", "Ring", "Little"] as const;
+
+/**
+ * How curled each finger is (0 = straight, 1 = fist), by mood: relaxed hands are a little curled, the little finger
+ * more than the index; angry ones close into fists; happy ones open up. While speaking the curl breathes a little,
+ * and each finger drifts slowly on its own so the hands never look frozen.
+ */
+export function fingerCurl(s: { t: number; emotion: Emotion; speaking: boolean; level: number; waving?: boolean }): Record<(typeof FINGER_NAMES)[number], number> {
+  const base: Record<Emotion, number> = { neutral: 0.32, happy: 0.18, sad: 0.4, angry: 0.85, surprised: 0.12, thinking: 0.45, shy: 0.5 };
+  const b = s.waving ? 0.08 : base[s.emotion];
+  const talk = s.speaking ? 0.06 * Math.sin(s.t * 2.1) + 0.05 * Math.min(1, s.level * 2) : 0;
+  const drift = (k: number) => 0.04 * Math.sin(s.t * (0.37 + k * 0.11) + k * 1.7);
+  const out = {} as Record<(typeof FINGER_NAMES)[number], number>;
+  FINGER_NAMES.forEach((f, k) => {
+    const spread = f === "Thumb" ? -0.1 : (k - 1) * 0.06; // the little finger curls a bit more than the index
+    out[f] = Math.max(0, Math.min(1, b + spread + talk + drift(k)));
+  });
+  return out;
+}
+
+/** Rotation (radians) of each finger segment for a curl of 1: the base bends less than the middle joint. */
+export const FINGER_SEGMENT_BEND = { Metacarpal: 0.25, Proximal: 1.1, Intermediate: 1.45, Distal: 0.9 } as const;

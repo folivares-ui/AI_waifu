@@ -26,7 +26,8 @@ function statue() {
   box(-0.07, -0.01, 0, 0.02, 0.03, 0.08);
   box(-0.09, 0.09, 0.47, 0.82, -0.05, 0.05); // torso
   box(-0.06, 0.06, 0.84, 1.0, -0.06, 0.06); // head
-  box(-0.08, 0.08, 0.6, 0.99, -0.09, -0.065); // long hair behind
+  // long hair behind: strands of small boxes, down to mid-back
+  for (let x = -0.07; x <= 0.071; x += 0.02) for (let y = 0.6; y < 0.99; y += 0.05) box(x, x + 0.015, y, y + 0.05, -0.09, -0.065);
   arm(1);
   arm(-1);
   const posBuf = Buffer.alloc(pos.length * 4);
@@ -66,6 +67,10 @@ describe("rigging a model that has no skeleton", () => {
     const bones = back.extensions!.VRMC_vrm!.humanoid!.humanBones!;
     for (const b of ["hips", "spine", "head", "leftUpperArm", "leftLowerArm", "leftHand", "rightHand", "leftUpperLeg", "leftLowerLeg", "leftFoot", "rightFoot"]) expect(bones[b]).toBeDefined();
     expect(fixVrm(r.fixed)).toBeUndefined(); // nothing left to do
+    // long hair gets chains of bones (for the app's hair physics), which are not humanoid bones
+    const names = (back.nodes as { name?: string }[]).map((n) => n.name ?? "");
+    expect(names.filter((n) => /^rig_hair_\d+_0$/.test(n)).length).toBeGreaterThan(0);
+    expect(Object.keys(bones).some((b) => b.startsWith("rig_") || b.startsWith("hair"))).toBe(false);
   });
 
   it("places the joints where the body is and skins each part to its bones", () => {

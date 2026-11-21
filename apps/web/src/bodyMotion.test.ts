@@ -77,3 +77,15 @@ describe("body language", () => {
     expect(worst).toBeLessThan(0.05); // radians per frame at 60 fps: no jumps when switching arms
   });
 });
+
+describe("fingers", () => {
+  it("curl with the mood: fists when angry, open when happy, relaxed otherwise", async () => {
+    const { fingerCurl } = await import("./bodyMotion");
+    const at = (emotion: "neutral" | "angry" | "happy") => fingerCurl({ t: 1, emotion, speaking: false, level: 0 });
+    expect(at("angry").Middle).toBeGreaterThan(at("neutral").Middle);
+    expect(at("happy").Middle).toBeLessThan(at("neutral").Middle);
+    expect(at("neutral").Little).toBeGreaterThan(at("neutral").Index); // the little finger curls a bit more
+    for (const v of Object.values(at("angry"))) expect(v).toBeLessThanOrEqual(1);
+    expect(fingerCurl({ t: 1, emotion: "angry", speaking: false, level: 0, waving: true }).Middle).toBeLessThan(0.3); // open hand to wave
+  });
+});

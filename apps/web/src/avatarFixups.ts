@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { MToonMaterial, VRMSpringBoneJoint, VRMSpringBoneManager, type VRM } from "@pixiv/three-vrm";
+import { MToonMaterial, VRMSpringBoneCollider, VRMSpringBoneColliderShapeCapsule, VRMSpringBoneColliderShapeSphere, VRMSpringBoneJoint, VRMSpringBoneManager, type VRM } from "@pixiv/three-vrm";
 
 /**
  * Repairs for models that were not authored as VRM (e.g. game models converted through a generic exporter):
@@ -116,6 +116,25 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
   if (vrm.springBoneManager && vrm.springBoneManager.joints.size > 0) return undefined;
   const mgr = new VRMSpringBoneManager();
   let count = 0;
+  // Hair chains made by the server's automatic rig ("rig_hair_<n>_<k>"): long hair, with the body as obstacles.
+  const hairRoots: THREE.Object3D[] = [];
+  vrm.scene.traverse((o) => {
+    if (/^rig_hair_\d+_0$/.test(o.name)) hairRoots.push(o);
+  });
+  if (hairRoots.length) {
+    const colliders = bodyColliders(vrm);
+    const group = { colliders, name: "body" };
+    const size = (vrm.humanoid.getRawBoneNode("head")?.getWorldPosition(new THREE.Vector3()).y ?? 1.35) / 0.85; // her height
+    for (const root of hairRoots) {
+      for (let o: THREE.Object3D | undefined = root; o; ) {
+        const next: THREE.Object3D | undefined = o.children.find((c) => /^rig_hair_\d+_\d+$/.test(c.name));
+        if (!next) break; // the last joint is the tip: nothing hangs from it
+        mgr.addJoint(new VRMSpringBoneJoint(o, next, { stiffness: 0.55, dragForce: 0.35, gravityPower: 0.35, gravityDir: new THREE.Vector3(0, -1, 0), hitRadius: 0.012 * size }, [group]));
+        count++;
+        o = next;
+      }
+    }
+  }
   vrm.scene.traverse((o) => {
     if (!SPRING_CHAIN.test(o.name)) return;
     const next = o.children.find((c) => CHAIN_LINK.test(c.name)) ?? o.children.find((c) => /_end(_\d+)?$/.test(c.name)) ?? null;
@@ -126,6 +145,42 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
   if (count === 0) return undefined;
   mgr.setInitState();
   return mgr;
+}
+
+/**
+ * Spheres and capsules standing for her head, neck, chest, hips and upper arms, so swinging hair slides over the
+ * body instead of through it. Sizes from her height. Each collider is attached to its bone with the bone's world
+ * scale undone, so its radius is in metres whatever the skeleton's scale.
+ */
+function bodyColliders(vrm: VRM): VRMSpringBoneCollider[] {
+  const H = vrm.humanoid;
+  const size = (H.getRawBoneNode("head")?.getWorldPosition(new THREE.Vector3()).y ?? 1.35) / 0.85;
+  const out: VRMSpringBoneCollider[] = [];
+  const attach = (bone: string, shape: VRMSpringBoneColliderShapeSphere | VRMSpringBoneColliderShapeCapsule) => {
+    const b = H.getRawBoneNode(bone as never);
+    if (!b) return;
+    const c = new VRMSpringBoneCollider(shape);
+    b.updateWorldMatrix(true, false);
+    c.scale.setScalar(1 / (b.getWorldScale(new THREE.Vector3()).x || 1));
+    b.add(c);
+    out.push(c);
+  };
+  const toward = (from: string, to: string, k = 1) => {
+    const a = H.getRawBoneNode(from as never);
+    const b = H.getRawBoneNode(to as never);
+    if (!a || !b) return new THREE.Vector3();
+    const d = b.getWorldPosition(new THREE.Vector3()).sub(a.getWorldPosition(new THREE.Vector3())).multiplyScalar(k);
+    // into the bone's (unscaled) frame
+    const q = a.getWorldQuaternion(new THREE.Quaternion()).invert();
+    return d.applyQuaternion(q);
+  };
+  attach("head", new VRMSpringBoneColliderShapeSphere({ radius: 0.062 * size, offset: new THREE.Vector3(0, 0.05 * size, 0.005 * size) }));
+  attach("neck", new VRMSpringBoneColliderShapeSphere({ radius: 0.03 * size }));
+  attach("upperChest", new VRMSpringBoneColliderShapeCapsule({ radius: 0.075 * size, offset: new THREE.Vector3(0, 0, 0), tail: toward("upperChest", "chest", 1.2) }));
+  attach("chest", new VRMSpringBoneColliderShapeCapsule({ radius: 0.07 * size, offset: new THREE.Vector3(0, 0, 0), tail: toward("chest", "hips", 1) }));
+  attach("hips", new VRMSpringBoneColliderShapeSphere({ radius: 0.09 * size }));
+  for (const s of ["left", "right"]) attach(`${s}UpperArm`, new VRMSpringBoneColliderShapeCapsule({ radius: 0.03 * size, tail: toward(`${s}UpperArm`, `${s}LowerArm`) }));
+  return out;
 }
 
 /** Close-up for icons: the face, plus hat/ears when the model has them. */
