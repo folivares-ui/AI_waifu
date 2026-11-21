@@ -111,7 +111,7 @@ export class EyeCurtain {
       for (let j = 1; j <= 3; j++) {
         const x = eye.xs[k] + (end ? 1 : -1) * j * step;
         const h = half * (1 - j / 6); // (the hole's edge is steep at the corners: cover it fully)
-        const m = Math.max(mid - h, Math.min(mid + h, eye.meet[k]));
+        const m = eye.meet[k];
         if (end) {
           eye.xs.push(x);
           eye.top.push(mid + h);
@@ -182,7 +182,8 @@ export class EyeCurtain {
         const edge = fromTop ? e.top[c] : e.bottom[c];
         // starts a little behind the edge of the opening, so no seam shows between skin and lid
         const start = edge + (fromTop ? 1 : -1) * Math.min(0.002, 0.08 * gap);
-        const end = edge + (meet - edge) * amount + (fromTop ? -1 : 1) * 0.0005 * (amount > 0.98 ? 1 : 0);
+        const to = fromTop ? meet : Math.max(meet, edge); // (the lower lid never goes down)
+        const end = edge + (to - edge) * amount + (fromTop ? -1 : 1) * 0.0005 * (amount > 0.98 ? 1 : 0);
         for (let r = 0; r < ROWS; r++) {
           const y = start + ((end - start) * r) / (ROWS - 1);
           // in front of every layer of the eye (white, iris, highlights): its front-most point, plus a margin

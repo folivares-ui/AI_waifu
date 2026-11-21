@@ -254,20 +254,15 @@ export const CURTAIN_MEET = 0.35;
  * lashes on it are carried down without bending, even at the corners where the height changes fast.
  */
 function shutShift(e: Eye, x: number): number {
+  // One gentle arch over the whole eye (most in the middle, 35% of it at the corners and beyond), so the lash
+  // line keeps its own shape as it comes down instead of bending where the eye's height changes fast.
   const cols = [...e.top.keys()].filter((i) => isFinite(e.top[i]));
   if (!cols.length) return 0;
-  const xc = Math.min(e.x0 + cols[cols.length - 1] * RES, Math.max(e.x0 + cols[0] * RES, x));
-  const sigma = 0.002;
-  let sw = 0;
-  let sv = 0;
-  for (const i of cols) {
-    const d = e.x0 + i * RES - xc;
-    if (Math.abs(d) > 3 * sigma) continue;
-    const w = Math.exp(-(d * d) / (2 * sigma * sigma));
-    sw += w;
-    sv += w * (1 - CURTAIN_MEET) * (e.top[i] - e.bottom[i]);
-  }
-  return sw ? sv / sw : 0;
+  const x0 = e.x0 + cols[0] * RES;
+  const x1 = e.x0 + cols[cols.length - 1] * RES;
+  const xc = (x0 + x1) / 2;
+  const u = Math.min(1, Math.abs(x - xc) / ((x1 - x0) / 2 || 1));
+  return (1 - CURTAIN_MEET) * e.gmax * (1 - 0.65 * u * u);
 }
 
 /** What the app needs to draw the new eyelids of one eye (face frame). */
@@ -960,7 +955,7 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
         xs,
         top: tops,
         bottom: bottoms,
-        meet: xs.map((x, k) => Math.max(bottoms[k], Math.min(tops[k], tops[k] - shutShift(eye, x)))),
+        meet: xs.map((x, k) => tops[k] - shutShift(eye, x)), // (may pass the eye's lower edge at the corners)
         gmax: eye.gmax,
         ballZ: (x: number, y: number) => eye.ball.get(x, y),
       };
