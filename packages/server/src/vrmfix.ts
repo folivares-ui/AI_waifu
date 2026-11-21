@@ -1,3 +1,4 @@
+import { autoRig, needsRig, type RigGltf } from "./autorig.js";
 /**
  * Repairs VRM files whose humanoid bone list is empty (common in models converted from other formats, e.g.
  * Sketchfab exports): without it no VRM viewer can load them ("these humanoid bones are required but not exist").
@@ -463,17 +464,29 @@ const TARGET_HEIGHT = 1.58;
  * are unreadable) and a size far from a person's (some conversions lose a scale step: a 20 cm or 100 m model).
  * Throws with a readable message when the required bones cannot be recognised.
  */
-export function fixVrm(buf: Buffer): { fixed: Buffer; bones: number; scale?: number } | undefined {
-  const { json, bin } = readGlb(buf);
+export function fixVrm(buf: Buffer): { fixed: Buffer; bones: number; scale?: number; rigged?: boolean } | undefined {
+  const read = readGlb(buf);
+  const json = read.json;
+  let bin = read.bin;
   const v1 = json.extensions?.VRMC_vrm;
   const v0 = json.extensions?.VRM;
   const empty1 = v1 && Object.keys(v1.humanoid?.humanBones ?? {}).length === 0;
   const empty0 = v0 && (v0.humanoid?.humanBones ?? []).length === 0;
   const height = modelHeight(json, bin);
   const scale = height !== undefined && (height < 0.6 || height > 4) ? TARGET_HEIGHT / height : undefined;
+  const rig = (empty1 || empty0) && bin !== undefined && needsRig(json as unknown as RigGltf);
   if (!empty1 && !empty0 && scale === undefined) return undefined;
   if (scale !== undefined) rescale(json, scale);
   let bones = 0;
+  if (rig) {
+    // A statue (no skeleton at all): give it one. Done after resizing, so the skeleton has a person's size.
+    const r = autoRig(json as unknown as RigGltf, bin!);
+    bin = r.bin;
+    const map = r.humanBones;
+    if (empty1) v1!.humanoid = { ...(v1!.humanoid ?? {}), humanBones: Object.fromEntries(Object.entries(map).map(([b, node]) => [b, { node }])) };
+    if (empty0) v0!.humanoid = { ...(v0!.humanoid ?? {}), humanBones: Object.entries(map).map(([b, node]) => ({ bone: toVrm0(b), node })) };
+    return { fixed: writeGlb(json, bin), bones: Object.keys(map).length, scale, rigged: true };
+  }
   if (empty1 || empty0) {
     const joints = new Set(json.skins?.flatMap((s) => s.joints) ?? []);
     let map = guessHumanoid(json.nodes, joints);

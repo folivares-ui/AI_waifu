@@ -197,6 +197,9 @@ class Grid {
 
 const smooth = (t: number) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 
+/** The skin of a face mesh: its biggest piece (eyes, lashes, teeth... may be pieces of the same mesh). */
+const skinOf = (comps: number[][]) => comps.reduce((a, b) => (b.length > a.length ? b : a));
+
 // ---------- eyes ----------
 
 interface Eye {
@@ -219,7 +222,7 @@ function openingAt(e: Eye, x: number): { top: number; bottom: number; gap: numbe
  * Finds the opening of one eye: the hole of the face mesh around the eye centre, then where the eyeball is seen
  * through it (no face skin in front of it).
  */
-function findEye(meshes: FaceMeshIn[], comps: number[][][], center: V3): { eye: Eye; face: number } | undefined {
+function findEye(meshes: FaceMeshIn[], comps: number[][][], center: V3, midX?: number): { eye: Eye; face: number } | undefined {
   // 1. A hole of some mesh at the eye, with that mesh all around it (not the outline of a patch). The eye bone is
   // usually inside it; in some rigs it sits off it (at the back of the eyeball), so the nearest hole close by.
   let best: { loop: V3[]; mesh: number; area: number; d: number; front: number; size: number } | undefined;
@@ -229,6 +232,7 @@ function findEye(meshes: FaceMeshIn[], comps: number[][][], center: V3): { eye: 
       const w = mx[0] - mn[0];
       const h = mx[1] - mn[1];
       if (w < 0.008 || w > 0.09 || h < 0.004 || h > 0.07) continue;
+      if (midX !== undefined && mn[0] < midX && mx[0] > midX) continue; // spans both eyes: an opening inside the head
       const inside = inPolygon(center[0], center[1], loop);
       const d = inside ? 0 : Math.hypot((mn[0] + mx[0]) / 2 - center[0], (mn[1] + mx[1]) / 2 - center[1]);
       if (d > Math.max(w, h)) continue;
@@ -267,12 +271,16 @@ function findEye(meshes: FaceMeshIn[], comps: number[][][], center: V3): { eye: 
   const skin = new Grid(gx0, gy0, gx1, gy1, true);
   const back = new Grid(gx0, gy0, gx1, gy1, false);
   const zMin = hole.mn[2] - 0.006;
+  // The skin is the face mesh's biggest piece; its other pieces (eyeballs, lashes... some models keep them in the
+  // same mesh) are treated like separate meshes.
+  const skinPiece = new Uint8Array(meshes[face].pos.length / 3);
+  for (const i of skinOf(comps[face])) skinPiece[i] = 1;
   meshes.forEach((m, mi) => {
     const local = new Uint8Array(m.pos.length / 3);
-    if (mi !== face) for (const c of comps[mi]) if (c.every((i) => near(vtx(m, i)))) for (const i of c) local[i] = 1;
+    for (const c of comps[mi]) if (!(mi === face && skinPiece[c[0]]) && c.every((i) => near(vtx(m, i)))) for (const i of c) local[i] = 1;
     for (let t = 0; t < m.index.length; t += 3) {
       const [ia, ib, ic] = [m.index[t], m.index[t + 1], m.index[t + 2]];
-      if (mi === face) skin.tri(vtx(m, ia), vtx(m, ib), vtx(m, ic));
+      if (mi === face && skinPiece[ia]) skin.tri(vtx(m, ia), vtx(m, ib), vtx(m, ic));
       else if (local[ia] && local[ib] && local[ic]) back.tri(vtx(m, ia), vtx(m, ib), vtx(m, ic), (z) => z > zMin);
     }
   });
@@ -302,8 +310,8 @@ function findEye(meshes: FaceMeshIn[], comps: number[][][], center: V3): { eye: 
 
   // 4. Eyeball pieces (their surface is the back-most layer, in the middle of the opening), to keep lids in front.
   meshes.forEach((m, mi) => {
-    if (mi === face) return;
     for (const c of comps[mi]) {
+      if (mi === face && skinPiece[c[0]]) continue;
       const pts = c.map((i) => vtx(m, i));
       if (!pts.every(near)) continue;
       if (eyeballPiece(eye, pts, back)) {
@@ -318,7 +326,26 @@ function findEye(meshes: FaceMeshIn[], comps: number[][][], center: V3): { eye: 
 }
 
 /** True for the whites/iris of the eye: they lie on the back-most surface, around the middle of the opening. */
+/**
+ * A piece lying inside the eye opening, around its middle: part of the eyeball (iris, pupil, highlights), even if
+ * it sits a few mm in front of the eye white (anime eyes are often layered with depth).
+ */
+function insideOpening(e: Eye, pts: V3[]): boolean {
+  const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+  const o = openingAt(e, cx);
+  if (!o) return false;
+  const r = (cy - o.bottom) / (o.gap || 1);
+  if (r < 0.2 || r > 0.8) return false;
+  const inside = pts.filter((p) => {
+    const q = openingAt(e, p[0]);
+    return q !== undefined && p[1] > q.bottom - 0.001 && p[1] < q.top + 0.001;
+  }).length;
+  return inside >= 0.85 * pts.length;
+}
+
 function eyeballPiece(e: Eye, pts: V3[], back: Grid): boolean {
+  if (insideOpening(e, pts)) return true;
   const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
   const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
   const o = openingAt(e, cx);
@@ -489,7 +516,7 @@ function eyebrows(
     const unit = Math.max(0.003, Math.min(0.007, 0.38 * eye.gmax));
     meshes.forEach((m, mi) => {
       for (const c of comps[mi]) {
-        if (mi === face && c.length > m.pos.length / 6) continue; // the face skin itself
+        if (mi === face && c === skinOf(comps[mi])) continue; // the face skin itself
         const pts = c.map((i) => vtx(m, i));
         const { mn, mx } = bbox(pts);
         const cx = (mn[0] + mx[0]) / 2;
@@ -526,7 +553,8 @@ function eyebrows(
  */
 export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?: [V3, V3], expressive = false): FaceMorphs | undefined {
   const comps = meshes.map(components);
-  const found = eyes.map((c) => findEye(meshes, comps, c)).filter((x): x is { eye: Eye; face: number } => !!x);
+  const midX = eyes.length === 2 ? (eyes[0][0] + eyes[1][0]) / 2 : undefined;
+  const found = eyes.map((c) => findEye(meshes, comps, c, midX)).filter((x): x is { eye: Eye; face: number } => !!x);
   if (found.length === 0) return undefined;
   const upper: (Float32Array | undefined)[] = meshes.map(() => undefined);
   const lower: (Float32Array | undefined)[] = meshes.map(() => undefined);
@@ -537,7 +565,7 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
     meshes.forEach((m, mi) => {
       for (const c of comps[mi]) {
         const pts = c.map((i) => vtx(m, i));
-        const isFace = mi === face && c.length > m.pos.length / 6; // the face skin itself
+        const isFace = mi === face && c === skinOf(comps[mi]); // the face skin itself (its biggest piece)
         let rigid = false;
         if (!isFace) {
           // Pieces in front of the skin: lashes and eyeliner move with the lids; eyebrows, eyeballs and anything
@@ -553,7 +581,7 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
             const b = eye.ball.get(p[0], p[1]);
             return b !== undefined && p[2] <= b + 0.0005;
           }).length;
-          if (onBall > pts.length * 0.5) continue; // whites / iris
+          if (onBall > pts.length * 0.5 || insideOpening(eye, pts)) continue; // whites / iris / highlights
           if (mn[1] > o.top + 0.3 * eye.gmax) continue; // above the lid: eyebrow
           rigid = true;
         }
@@ -568,12 +596,12 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
             // Stay in front of the eyeball along the whole way (the morph moves in a straight line).
             let dz = 0;
             const startsVisible = (eye.ball.get(p[0], p[1]) ?? -Infinity) + 0.0008 <= p[2];
-            // (a vertex hidden behind the eyeball at rest only has to be in front of it once the lid is closed)
-            for (let s = startsVisible ? 0.05 : 1; s <= 1.0001; s += 0.05) {
+            // (a vertex hidden behind the eyeball at rest only has to be in front of it once the lid is a third down)
+            for (let s = startsVisible ? 0.05 : 0.35; s <= 1.0001; s += 0.05) {
               const b = eye.ball.get(p[0], p[1] + dy * s);
               if (b !== undefined) dz = Math.max(dz, (b + 0.0008 - p[2]) / s);
             }
-            dz = Math.min(dz, 0.25 * eye.gmax);
+            dz = Math.min(dz, 0.6 * eye.gmax);
             const arr = (target[mi] ??= new Float32Array(m.pos.length));
             arr[i * 3 + 1] += dy;
             arr[i * 3 + 2] += dz;
@@ -795,7 +823,12 @@ export class SynthFace {
       });
       m.updateMorphTargets();
       const mats = Array.isArray(m.material) ? m.material : [m.material];
-      for (const mat of mats) mat.needsUpdate = true;
+      for (const mat of mats) {
+        // The closed lid is the skin of the socket's rim stretched down over the eye: those triangles can end up
+        // facing away from the camera, and would be skipped as back faces.
+        if (slot.upper !== undefined) mat.side = THREE.DoubleSide;
+        mat.needsUpdate = true;
+      }
       slots.push(slot);
     });
     const face = new SynthFace(slots, res.info.eyes > 0, res.info.mouthWidth !== undefined, Object.keys(res.extra));
