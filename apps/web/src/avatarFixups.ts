@@ -128,11 +128,17 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
     for (const root of hairRoots) {
       // the first link (around the face, down to the chin) stays with the head: only below it does hair swing,
       // so strands next to the eyes never wave in front of them
-      const first = root.children.find((c) => /^rig_hair_\d+_\d+$/.test(c.name));
+      // (a third of the way down: the second link of a 4-joint chain, the third of a 7-joint one)
+      const chain: THREE.Object3D[] = [root];
+      for (let o: THREE.Object3D | undefined = root; o; ) {
+        o = o.children.find((c) => /^rig_hair_\d+_\d+$/.test(c.name));
+        if (o) chain.push(o);
+      }
+      const first = chain[chain.length > 4 ? 2 : 1];
       for (let o: THREE.Object3D | undefined = first; o; ) {
         const next: THREE.Object3D | undefined = o.children.find((c) => /^rig_hair_\d+_\d+$/.test(c.name));
         if (!next) break; // the last joint is the tip: nothing hangs from it
-        mgr.addJoint(new VRMSpringBoneJoint(o, next, { stiffness: 0.55, dragForce: 0.35, gravityPower: 0.35, gravityDir: new THREE.Vector3(0, -1, 0), hitRadius: 0.012 * size }, [group]));
+        mgr.addJoint(new VRMSpringBoneJoint(o, next, { stiffness: 0.55, dragForce: 0.35, gravityPower: 0.35, gravityDir: new THREE.Vector3(0, -1, 0), hitRadius: 0.02 * size }, [group])); // (a lock of hair is about this thick)
         count++;
         o = next;
       }
@@ -229,7 +235,39 @@ function bodyColliders(vrm: VRM): VRMSpringBoneCollider[] {
     }
   });
   attach("hips", new VRMSpringBoneColliderShapeSphere({ radius: 0.09 * size }));
-  for (const s of ["left", "right"]) attach(`${s}UpperArm`, new VRMSpringBoneColliderShapeCapsule({ radius: 0.03 * size, tail: toward(`${s}UpperArm`, `${s}LowerArm`) }));
+  // Shoulders and upper arms: capsules as thick as her own sleeves (measured on the mesh around each bone).
+  const thickness = (bone: string, child: string) => {
+    const a = H.getRawBoneNode(bone as never);
+    const c = H.getRawBoneNode(child as never);
+    if (!a || !c) return 0.03 * size;
+    const A = a.getWorldPosition(new THREE.Vector3());
+    const d = c.getWorldPosition(new THREE.Vector3()).sub(A);
+    const L = d.length();
+    d.normalize();
+    const rs: number[] = [];
+    const t = new THREE.Vector3();
+    vrm.scene.traverse((o) => {
+      const m = o as THREE.SkinnedMesh;
+      if (!m.isSkinnedMesh || !m.visible) return;
+      const si = m.geometry.attributes.skinIndex, sw = m.geometry.attributes.skinWeight;
+      if (!si || !sw) return;
+      for (let i = 0; i < m.geometry.attributes.position.count; i += 2) {
+        let best = 0;
+        for (let k = 1; k < 4; k++) if (sw.getComponent(i, k) > sw.getComponent(i, best)) best = k;
+        if (m.skeleton.bones[si.getComponent(i, best)] !== a) continue;
+        m.getVertexPosition(i, t).applyMatrix4(m.matrixWorld);
+        const s2 = Math.max(0, Math.min(L, t.clone().sub(A).dot(d)));
+        rs.push(t.distanceTo(A.clone().addScaledVector(d, s2)));
+      }
+    });
+    if (rs.length < 20) return 0.03 * size;
+    rs.sort((x, y) => x - y);
+    return rs[Math.floor(rs.length * 0.9)];
+  };
+  for (const s of ["left", "right"]) {
+    attach(`${s}UpperArm`, new VRMSpringBoneColliderShapeCapsule({ radius: thickness(`${s}UpperArm`, `${s}LowerArm`), tail: toward(`${s}UpperArm`, `${s}LowerArm`) }));
+    attach(`${s}Shoulder`, new VRMSpringBoneColliderShapeCapsule({ radius: thickness(`${s}Shoulder`, `${s}UpperArm`), tail: toward(`${s}Shoulder`, `${s}UpperArm`) }));
+  }
   return out;
 }
 

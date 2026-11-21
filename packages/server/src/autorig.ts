@@ -561,7 +561,7 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
     if (pts.length < 30) return;
     const bottom = Math.min(...pts.map((v) => v[1]));
     if (rootY - bottom < 0.06 * H) return;
-    const ys = [0, 0.33, 0.66, 0.95].map((f) => rootY - f * (rootY - bottom));
+    const ys = [0, 0.16, 0.33, 0.5, 0.66, 0.82, 0.96].map((f) => rootY - f * (rootY - bottom));
     const names: string[] = [];
     let prev: V3 | undefined;
     ys.forEach((y, k) => {

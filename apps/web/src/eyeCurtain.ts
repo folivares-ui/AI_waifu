@@ -64,11 +64,21 @@ export class EyeCurtain {
     });
     // The lids sit just behind the eye's layers (which are squeezed out of their way as they close, see
     // synthFace), so the lashes, in front of the eye, are always in front of the lids too.
-    let back = Infinity;
+    // (the eye's surface, robustly: the 10th percentile of its depth inside the opening; the very edges can
+    // dip into the socket and would drag the lids far back, opening gaps at the rim)
+    const zs: number[] = [];
     eye.xs.forEach((x, c) => {
-      for (let k = 0; k <= 10; k++) back = Math.min(back, eye.ballZ(x, eye.bottom[c] + ((eye.top[c] - eye.bottom[c]) * k) / 10) ?? Infinity);
+      for (let k = 1; k <= 9; k++) {
+        const z = eye.ballZ(x, eye.bottom[c] + ((eye.top[c] - eye.bottom[c]) * k) / 10);
+        if (z !== undefined) zs.push(z);
+      }
     });
-    this.front = isFinite(back) ? back - 0.0015 : isFinite(f) ? f : 0;
+    zs.sort((a, b) => a - b);
+    // As far forward as possible (no gap to the skin's rim seen from the side), but behind the lashes
+    // (always in front) and the rim; never behind the middle of the eye's surface.
+    const surface = zs.length ? zs[Math.floor(zs.length * 0.5)] : isFinite(f) ? f : 0;
+    const rim = Math.min(...eye.rimTop);
+    this.front = Math.max(surface - 0.002, Math.min(rim - 0.0006, (eye.lashBack ?? Infinity) - 0.0005));
     this.midY = (Math.max(...eye.top) + Math.min(...eye.bottom)) / 2;
     const make = (uvAt: (x: number, r: number) => [number, number], name: string, flip: boolean) => {
       const n = eye.xs.length * ROWS;
@@ -108,26 +118,30 @@ export class EyeCurtain {
     const uv = faceMesh.geometry.attributes.uv;
     if (!uv || eyeIn.xs.length < 3) return undefined;
     // a little wider than the opening at both corners (the eye white tapers under the skin there)
-    const eye: CurtainEye = { ...eyeIn, xs: [...eyeIn.xs], top: [...eyeIn.top], bottom: [...eyeIn.bottom], meet: [...eyeIn.meet] };
+    const eye: CurtainEye = { ...eyeIn, xs: [...eyeIn.xs], top: [...eyeIn.top], bottom: [...eyeIn.bottom], meet: [...eyeIn.meet], rimTop: [...eyeIn.rimTop], rimBottom: [...eyeIn.rimBottom] };
     const step = 0.001;
     for (const end of [0, 1]) {
       const k = end ? eye.xs.length - 1 : 0;
       const mid = (eye.top[k] + eye.bottom[k]) / 2;
       const half = (eye.top[k] - eye.bottom[k]) / 2;
-      for (let j = 1; j <= 3; j++) {
+      for (let j = 1; j <= 6; j++) {
         const x = eye.xs[k] + (end ? 1 : -1) * j * step;
-        const h = half * (1 - j / 6); // (the hole's edge is steep at the corners: cover it fully)
+        const h = half * (1 - j / 9); // (the hole's edge is steep at the corners: cover it fully)
         const m = eye.meet[k];
         if (end) {
           eye.xs.push(x);
           eye.top.push(mid + h);
           eye.bottom.push(mid - h);
           eye.meet.push(m);
+          eye.rimTop.push(eye.rimTop[eye.rimTop.length - 1]);
+          eye.rimBottom.push(eye.rimBottom[eye.rimBottom.length - 1]);
         } else {
           eye.xs.unshift(x);
           eye.top.unshift(mid + h);
           eye.bottom.unshift(mid - h);
           eye.meet.unshift(m);
+          eye.rimTop.unshift(eye.rimTop[0]);
+          eye.rimBottom.unshift(eye.rimBottom[0]);
         }
       }
     }
@@ -187,13 +201,19 @@ export class EyeCurtain {
         void CURTAIN_MEET;
         const edge = fromTop ? e.top[c] : e.bottom[c];
         // starts a little behind the edge of the opening, so no seam shows between skin and lid
-        const start = edge + (fromTop ? 1 : -1) * Math.min(0.002, 0.08 * gap);
+        // (and reaches well behind the skin's rim, so no gap opens between the two from the side)
+        const start = edge + (fromTop ? 1 : -1) * 0.005;
+        const rim = (fromTop ? e.rimTop[c] : e.rimBottom[c]) - 0.0006;
         const to = fromTop ? meet : Math.max(meet, edge); // (the lower lid never goes down)
         const end = edge + (to - edge) * amount + (fromTop ? -1 : 1) * 0.0005 * (amount > 0.98 ? 1 : 0);
         for (let r = 0; r < ROWS; r++) {
           const y = start + ((end - start) * r) / (ROWS - 1);
           // in front of every layer of the eye (white, iris, highlights): its front-most point, plus a margin
-          const z = this.front;
+          // hangs from just behind the skin's rim, then goes back behind the eye's layers within 3 mm
+          const inside = fromTop ? edge - y : y - edge;
+          const t = Math.max(0, Math.min(1, inside / 0.003));
+          const b = t * t * (3 - 2 * t);
+          const z = Math.min(rim, rim * (1 - b) + this.front * b);
           v.set(x, y, z).applyMatrix4(this.toHead);
           p.setXYZ(c * ROWS + r, v.x, v.y, v.z);
         }

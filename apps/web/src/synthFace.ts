@@ -238,6 +238,8 @@ interface Eye {
   curtain?: boolean;
   /** The hole of the face skin around the eye (its outline). */
   hole?: V3[];
+  /** Depth of the back-most point of the upper lashes (the new lids must stay behind them). */
+  lashBack?: number;
 }
 
 /** Morph target (not a rig channel) that sinks a new-lid eye's layers out of sight once it is shut. */
@@ -268,6 +270,18 @@ function shutShift(e: Eye, x: number): number {
   return (1 - CURTAIN_MEET) * e.gmax * (1 - 0.65 * u * u);
 }
 
+/** Depth of the hole's outline near a point of its upper (or lower) side. */
+function rimZ(hole: V3[], x: number, y: number, upperSide: boolean): number {
+  let best: V3 | undefined;
+  let bd = Infinity;
+  for (const q of hole) {
+    if (upperSide ? q[1] < y - 0.004 : q[1] > y + 0.004) continue;
+    const d = Math.hypot(q[0] - x, q[1] - y);
+    if (d < bd) (bd = d), (best = q);
+  }
+  return best ? best[2] : hole.reduce((a, q) => Math.max(a, q[2]), -Infinity);
+}
+
 /** What the app needs to draw the new eyelids of one eye (face frame). */
 export interface CurtainEye {
   face: number;
@@ -283,6 +297,10 @@ export interface CurtainEye {
   skin: number[];
   /** Where the lids meet when shut, per column (the same curve the lashes come down to). */
   meet: number[];
+  /** Depth of the skin's rim at the upper / lower edge of the eye, per column (the lids hang from it). */
+  rimTop: number[];
+  rimBottom: number[];
+  lashBack?: number;
 }
 
 function openingAt(e: Eye, x: number): { top: number; bottom: number; gap: number } | undefined {
@@ -810,6 +828,7 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
             const pieceUpper = cy > o.bottom + 0.5 * o.gap;
             for (const i of c) {
               if (pieceUpper) {
+                eye.lashBack = Math.min(eye.lashBack ?? Infinity, vtx(m, i)[2]);
                 const arr = (upper[mi] ??= new Float32Array(m.pos.length));
                 arr[i * 3 + 1] += -shutShift(eye, vtx(m, i)[0]);
               } else sink(mi, i); // lower lashes stay until the eye is shut, then go
@@ -994,6 +1013,9 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
         top: tops,
         bottom: bottoms,
         meet: xs.map((x, k) => tops[k] - shutShift(eye, x)), // (may pass the eye's lower edge at the corners)
+        lashBack: eye.lashBack,
+        rimTop: xs.map((x, k) => rimZ(hole, x, tops[k], true)),
+        rimBottom: xs.map((x, k) => rimZ(hole, x, bottoms[k], false)),
         gmax: eye.gmax,
         ballZ: (x: number, y: number) => eye.ball.get(x, y),
       };
