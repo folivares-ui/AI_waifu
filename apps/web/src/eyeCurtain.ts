@@ -15,6 +15,31 @@ const ROWS = 7;
 
 type V3 = [number, number, number];
 
+/** Reads the colour (0..1 rgb) of the mesh's texture at a UV, or undefined if it cannot. */
+function texelReader(mesh: THREE.Mesh): ((u: number, v: number) => [number, number, number] | undefined) | undefined {
+  try {
+    const map = ([mesh.material].flat()[0] as THREE.Material & { map?: THREE.Texture | null }).map;
+    const img = map?.image as (CanvasImageSource & { width: number; height: number }) | undefined;
+    if (!map || !img || !img.width) return undefined;
+    const cv = document.createElement("canvas");
+    cv.width = img.width;
+    cv.height = img.height;
+    const g = cv.getContext("2d", { willReadFrequently: true });
+    if (!g) return undefined;
+    g.drawImage(img, 0, 0);
+    const data = g.getImageData(0, 0, cv.width, cv.height).data;
+    return (u, v) => {
+      const x = Math.min(cv.width - 1, Math.max(0, Math.floor((((u % 1) + 1) % 1) * cv.width)));
+      const yy = (((v % 1) + 1) % 1);
+      const y = Math.min(cv.height - 1, Math.max(0, Math.floor((map.flipY ? 1 - yy : yy) * cv.height)));
+      const k = (y * cv.width + x) * 4;
+      return [data[k] / 255, data[k + 1] / 255, data[k + 2] / 255];
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export class EyeCurtain {
   private upper: THREE.Mesh;
   private lower: THREE.Mesh;
@@ -28,8 +53,8 @@ export class EyeCurtain {
     private eye: CurtainEye,
     head: THREE.Object3D,
     material: THREE.Material,
-    uvAbove: (x: number) => [number, number],
-    uvBelow: (x: number) => [number, number],
+    uvAbove: (x: number, r: number) => [number, number],
+    uvBelow: (x: number, r: number) => [number, number],
   ) {
     head.updateMatrixWorld(true);
     this.toHead.copy(head.matrixWorld).invert();
@@ -39,22 +64,22 @@ export class EyeCurtain {
     });
     this.front = isFinite(f) ? f : 0;
     this.midY = (Math.max(...eye.top) + Math.min(...eye.bottom)) / 2;
-    const make = (uvAt: (x: number) => [number, number], name: string) => {
+    const make = (uvAt: (x: number, r: number) => [number, number], name: string, flip: boolean) => {
       const n = eye.xs.length * ROWS;
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3));
       g.setAttribute("normal", new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3));
       const uv = new Float32Array(n * 2);
       eye.xs.forEach((x, c) => {
-        const [u, v] = uvAt(x);
-        for (let r = 0; r < ROWS; r++) uv.set([u, v], (c * ROWS + r) * 2);
+        for (let r = 0; r < ROWS; r++) uv.set(uvAt(x, r), (c * ROWS + r) * 2);
       });
       g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
       const idx: number[] = [];
       for (let c = 0; c < eye.xs.length - 1; c++) {
         for (let r = 0; r < ROWS - 1; r++) {
           const a = c * ROWS + r, b = a + 1, d = a + ROWS, e = d + 1;
-          idx.push(a, d, b, b, d, e);
+          if (flip) idx.push(a, b, d, b, e, d); // facing the camera
+          else idx.push(a, d, b, b, d, e);
         }
       }
       g.setIndex(idx);
@@ -65,8 +90,8 @@ export class EyeCurtain {
       head.add(m);
       return m;
     };
-    this.upper = make(uvAbove, "eyelid (upper)");
-    this.lower = make(uvBelow, "eyelid (lower)");
+    this.upper = make(uvAbove, "eyelid (upper)", true);
+    this.lower = make(uvBelow, "eyelid (lower)", false);
   }
 
   /**
@@ -97,31 +122,38 @@ export class EyeCurtain {
         }
       }
     }
-    // the skin vertex nearest to a point, in front (not the eyeball or the inside of the head)
-    const nearest = (x: number, y: number, z: number): [number, number] => {
-      let best = -1;
+    // The lid continues the skin around the eye: each point of it takes the texture of the face's skin just
+    // beyond the opening's edge, as if that skin had slid over the eye (only the skin piece: never the lashes or
+    // eyeliner, which are other pieces of the same mesh).
+    const skin = eye.skin.filter((i) => {
+      const x = pos[i * 3], y = pos[i * 3 + 1];
+      return x > eye.xs[0] - 0.02 && x < eye.xs[eye.xs.length - 1] + 0.02 && y > Math.min(...eye.bottom) - 0.03 && y < Math.max(...eye.top) + 0.04;
+    });
+    const nearest = (x: number, y: number): [number, number] => {
+      let best = eye.skinVertex;
       let bd = Infinity;
-      for (let i = 0; i < pos.length / 3; i++) {
-        if (pos[i * 3 + 2] < z - 0.004) continue;
+      for (const i of skin) {
         const d = Math.hypot(pos[i * 3] - x, pos[i * 3 + 1] - y);
-        if (d < bd) {
-          bd = d;
-          best = i;
-        }
+        if (d < bd) (bd = d), (best = i);
       }
-      return best < 0 ? [0, 0] : [uv.getX(best), uv.getY(best)];
+      return [uv.getX(best), uv.getY(best)];
     };
-    const at = (k: number) => Math.min(eye.xs.length - 1, Math.max(0, k));
-    const col = (x: number) => at(eye.xs.findIndex((v) => v >= x));
-    const frontAt = (x: number, y: number) => eye.ballZ(x, y) ?? eye.ballZ(x, (eye.top[col(x)] + eye.bottom[col(x)]) / 2) ?? 0;
-    const lift = Math.min(0.15 * eye.gmax, 0.004);
-    // one plain skin colour for the whole lid (sampling right next to the eye picks up lashes and eyeliner)
-    void nearest;
-    void lift;
-    void frontAt;
-    const skinUv: [number, number] = [uv.getX(eye.skinVertex), uv.getY(eye.skinVertex)];
-    const uvAbove = () => skinUv;
-    const uvBelow = () => skinUv;
+    // One colour for the whole lid: the skin right above the middle of the eye (the lid's own skin, which is
+    // what surrounds the closed eye), if its texel really is skin-coloured; else the forehead.
+    const texel = texelReader(faceMesh);
+    const ref = texel?.(uv.getX(eye.skinVertex), uv.getY(eye.skinVertex));
+    const mid = Math.floor(eye.xs.length / 2);
+    let pick: [number, number] = [uv.getX(eye.skinVertex), uv.getY(eye.skinVertex)];
+    for (const up of [0.35, 0.5, 0.65, 0.8]) {
+      const cand = nearest(eye.xs[mid], eye.top[mid] + up * eye.gmax);
+      const c = texel?.(cand[0], cand[1]);
+      if (ref && c && Math.abs(c[0] - ref[0]) + Math.abs(c[1] - ref[1]) + Math.abs(c[2] - ref[2]) < 0.15) {
+        pick = cand;
+        break;
+      }
+    }
+    const uvAbove = () => pick;
+    const uvBelow = () => pick;
     const mat = [faceMesh.material].flat()[0].clone();
     mat.side = THREE.DoubleSide;
     const c = new EyeCurtain(eye, head, mat, uvAbove, uvBelow);

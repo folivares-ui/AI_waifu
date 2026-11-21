@@ -259,6 +259,8 @@ export interface CurtainEye {
   ballZ: (x: number, y: number) => number | undefined;
   /** A vertex of the face's skin, clear of the eye and the eyebrow: the lids take their colour from it. */
   skinVertex: number;
+  /** Vertices of the face's skin (its texture is continued over the lids). */
+  skin: number[];
 }
 
 function openingAt(e: Eye, x: number): { top: number; bottom: number; gap: number } | undefined {
@@ -928,6 +930,7 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
       }
       return {
         skinVertex,
+        skin,
         face,
         xs,
         top: tops,
