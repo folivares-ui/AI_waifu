@@ -244,6 +244,9 @@ interface Eye {
 export const EYE_HIDE = "_eyeHide";
 /** Morph target that brings the upper lashes in front of the new lids as soon as they move. */
 export const LASH_FWD = "_lashFwd";
+/** Morph targets that squeeze a new-lid eye below its closing lid, one per stage of closing. */
+export const EYE_CLIP = "_eyeClip";
+export const CLIP_STAGES = [0.25, 0.5, 0.75, 0.9, 1];
 
 /** Where the new lids meet when the eye is shut, as a fraction of its height from the bottom. */
 export const CURTAIN_MEET = 0.35;
@@ -681,6 +684,7 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
   const hide: (Float32Array | undefined)[] = meshes.map(() => undefined);
   // ...and the upper lashes come forward, in front of the new lid, as soon as it starts to move (they lie on it)
   const lashFwd: (Float32Array | undefined)[] = meshes.map(() => undefined);
+  const clip: (Float32Array | undefined)[][] = CLIP_STAGES.map(() => meshes.map(() => undefined));
   const lidFront = (e: Eye) => {
     let f = -Infinity;
     for (let i = 0; i < e.top.length; i++) {
@@ -752,7 +756,25 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
             // (eyeballs that are separate meshes sit well behind the lid: only their corners need it)
             const cornersOnly = mi !== face;
             if (eye.curtain) {
-              for (const i of c) sink(mi, i);
+              // the eye under a closing lid is squeezed below the lid's edge (staged: see CLIP_STAGES), so the
+              // lid never has to be in front of it
+              for (const i of c) {
+                const q = vtx(m, i);
+                const cols = [...eye.top.keys()].filter((kk) => isFinite(eye.top[kk]));
+                const xx = Math.min(eye.x0 + cols[cols.length - 1] * RES, Math.max(eye.x0 + cols[0] * RES, q[0]));
+                const o = openingAt(eye, xx);
+                if (!o) continue;
+                const shift = shutShift(eye, q[0]);
+                const meet = o.top - shift;
+                CLIP_STAGES.forEach((k, j) => {
+                  const upperEdge = o.top - k * shift;
+                  const lk = smooth((k - 0.8) / 0.2);
+                  const lowerEdge = o.bottom + lk * Math.max(0, meet - o.bottom);
+                  const y = Math.max(Math.min(q[1], upperEdge), Math.min(lowerEdge, upperEdge));
+                  if (y !== q[1]) (clip[j][mi] ??= new Float32Array(m.pos.length))[i * 3 + 1] = y - q[1];
+                });
+                sink(mi, i);
+              }
               continue;
             }
             const cols = [...eye.top.keys()].filter((i) => isFinite(eye.top[i]));
@@ -773,9 +795,28 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
             continue;
           }
           // the eyebrow (it has its own channels) and the crease line drawn above the lid stay where they are
-          if (isBrow(eye, pts, 0.03)) continue;
+          if (isBrow(eye, pts, 0.12)) continue; // (lash strips hug the top edge: lower than this)
           if (mn[1] > o.top + 1.3 * eye.gmax) continue; // well above the eye: not part of the lid
           rigid = true;
+        }
+        // New-lid eyes: a lash piece moves as one (a strip hanging into the eye must not split at its middle):
+        // it belongs to the upper lid or the lower one by where its centre is.
+        if (rigid && eye.curtain) {
+          const cx = pts.reduce((a, q) => a + q[0], 0) / pts.length;
+          const cy = pts.reduce((a, q) => a + q[1], 0) / pts.length;
+          const cols = [...eye.top.keys()].filter((k) => isFinite(eye.top[k]));
+          const o = cols.length ? openingAt(eye, Math.min(eye.x0 + cols[cols.length - 1] * RES, Math.max(eye.x0 + cols[0] * RES, cx))) : undefined;
+          if (o) {
+            const pieceUpper = cy > o.bottom + 0.5 * o.gap;
+            for (const i of c) {
+              if (pieceUpper) {
+                const arr = (upper[mi] ??= new Float32Array(m.pos.length));
+                arr[i * 3 + 1] += -shutShift(eye, vtx(m, i)[0]);
+              } else sink(mi, i); // lower lashes stay until the eye is shut, then go
+              moved++;
+            }
+          }
+          continue;
         }
         for (const i of c) {
           const p = vtx(m, i);
@@ -794,11 +835,6 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
               void meet;
               // the upper lashes are carried down whole (no squashing), by the same smooth amount as the lid's edge
               dy = isUpper ? -shutShift(eye, p[0]) : 0;
-              const lf = isUpper ? lidFront(eye) : undefined;
-              if (lf !== undefined && p[2] < lf + 0.0008) {
-                const a = (lashFwd[mi] ??= new Float32Array(m.pos.length));
-                a[i * 3 + 2] = Math.max(a[i * 3 + 2], lf + 0.0008 - p[2]);
-              }
               if (!isUpper) sink(mi, i); // the lower lashes stay until the eye is shut, then go: one line stays
             } else if (rigid && isUpper && lw.top !== undefined && lw.bottom !== undefined) {
               // Upper lashes and eyeliner all gather on the closed line (also at the corners, where the opening is
@@ -829,7 +865,9 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
 
   const extra: Record<string, (Float32Array | undefined)[]> = {};
   if (hide.some(Boolean)) extra[EYE_HIDE] = hide;
-  if (lashFwd.some(Boolean)) extra[LASH_FWD] = lashFwd;
+  void lashFwd;
+  void lidFront;
+  for (let j = 0; j < CLIP_STAGES.length; j++) if (clip[j].some(Boolean)) extra[`${EYE_CLIP}${j}`] = clip[j];
   const put = (channel: string, mi: number, i: number, x: number, y: number, z: number) => {
     const arr = ((extra[channel] ??= meshes.map(() => undefined))[mi] ??= new Float32Array(meshes[mi].pos.length));
     arr[i * 3] += x;
@@ -1180,7 +1218,21 @@ export class SynthFace {
       const k = Math.max(0, Math.min(1, upper / 0.9));
       upper = k;
       lower = k * k * k;
-      w = { ...w, [EYE_HIDE]: smooth((k - 0.86) / 0.1), [LASH_FWD]: Math.min(1, k * 8) };
+      const extraW: Record<string, number> = { [EYE_HIDE]: smooth((k - 0.86) / 0.1) };
+      // piecewise between the clip stages (stage "0" = no clipping)
+      const ks = [0, ...CLIP_STAGES];
+      for (let j = 0; j < CLIP_STAGES.length; j++) extraW[`${EYE_CLIP}${j}`] = 0;
+      for (let j = 0; j < ks.length - 1; j++) {
+        if (k >= ks[j] && k <= ks[j + 1]) {
+          const t = (k - ks[j]) / (ks[j + 1] - ks[j] || 1);
+          // (once the eye is hidden the clipping fades out, or the two would add up into a visible sliver)
+          const keep = 1 - extraW[EYE_HIDE];
+          if (j > 0) extraW[`${EYE_CLIP}${j - 1}`] = (1 - t) * keep;
+          extraW[`${EYE_CLIP}${j}`] = t * keep;
+          break;
+        }
+      }
+      w = { ...w, ...extraW };
     }
     const open = Math.max(0, w.mouthOpen ?? 0);
     for (const s of this.slots) {

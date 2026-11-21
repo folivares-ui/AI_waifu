@@ -62,7 +62,13 @@ export class EyeCurtain {
     eye.xs.forEach((x, c) => {
       for (let k = 0; k <= 10; k++) f = Math.max(f, eye.ballZ(x, eye.bottom[c] + ((eye.top[c] - eye.bottom[c]) * k) / 10) ?? -Infinity);
     });
-    this.front = isFinite(f) ? f : 0;
+    // The lids sit just behind the eye's layers (which are squeezed out of their way as they close, see
+    // synthFace), so the lashes, in front of the eye, are always in front of the lids too.
+    let back = Infinity;
+    eye.xs.forEach((x, c) => {
+      for (let k = 0; k <= 10; k++) back = Math.min(back, eye.ballZ(x, eye.bottom[c] + ((eye.top[c] - eye.bottom[c]) * k) / 10) ?? Infinity);
+    });
+    this.front = isFinite(back) ? back - 0.0015 : isFinite(f) ? f : 0;
     this.midY = (Math.max(...eye.top) + Math.min(...eye.bottom)) / 2;
     const make = (uvAt: (x: number, r: number) => [number, number], name: string, flip: boolean) => {
       const n = eye.xs.length * ROWS;
@@ -187,7 +193,7 @@ export class EyeCurtain {
         for (let r = 0; r < ROWS; r++) {
           const y = start + ((end - start) * r) / (ROWS - 1);
           // in front of every layer of the eye (white, iris, highlights): its front-most point, plus a margin
-          const z = Math.max(this.front, e.ballZ(x, y) ?? -Infinity) + 0.0012;
+          const z = this.front;
           v.set(x, y, z).applyMatrix4(this.toHead);
           p.setXYZ(c * ROWS + r, v.x, v.y, v.z);
         }
