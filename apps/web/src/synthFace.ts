@@ -788,7 +788,10 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
                   const upperEdge = o.top - k * shift;
                   const lk = smooth((k - 0.8) / 0.2);
                   const lowerEdge = o.bottom + lk * Math.max(0, meet - o.bottom);
-                  const y = Math.max(Math.min(q[1], upperEdge), Math.min(lowerEdge, upperEdge));
+                  // (only what is visible in the opening is squeezed: the eye white tucked under the skin below
+                  // stays where it is, or a gap would open behind the lower rim)
+                  let y = Math.min(q[1], upperEdge);
+                  if (q[1] >= o.bottom && lk > 0) y = Math.max(y, Math.min(lowerEdge, upperEdge));
                   if (y !== q[1]) (clip[j][mi] ??= new Float32Array(m.pos.length))[i * 3 + 1] = y - q[1];
                 });
                 sink(mi, i);

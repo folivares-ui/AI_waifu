@@ -124,9 +124,9 @@ export class EyeCurtain {
       const k = end ? eye.xs.length - 1 : 0;
       const mid = (eye.top[k] + eye.bottom[k]) / 2;
       const half = (eye.top[k] - eye.bottom[k]) / 2;
-      for (let j = 1; j <= 6; j++) {
+      for (let j = 1; j <= 2; j++) {
         const x = eye.xs[k] + (end ? 1 : -1) * j * step;
-        const h = half * (1 - j / 9); // (the hole's edge is steep at the corners: cover it fully)
+        const h = half * (1 - j / 3); // (the hole's edge is steep at the corners: cover it fully)
         const m = eye.meet[k];
         if (end) {
           eye.xs.push(x);
@@ -202,7 +202,7 @@ export class EyeCurtain {
         const edge = fromTop ? e.top[c] : e.bottom[c];
         // starts a little behind the edge of the opening, so no seam shows between skin and lid
         // (and reaches well behind the skin's rim, so no gap opens between the two from the side)
-        const start = edge + (fromTop ? 1 : -1) * 0.005;
+        const start = edge + (fromTop ? 1 : -1) * 0.001; // (further out it would show over the skin, which curves back)
         const rim = (fromTop ? e.rimTop[c] : e.rimBottom[c]) - 0.0006;
         const to = fromTop ? meet : Math.max(meet, edge); // (the lower lid never goes down)
         const end = edge + (to - edge) * amount + (fromTop ? -1 : 1) * 0.0005 * (amount > 0.98 ? 1 : 0);
@@ -213,7 +213,9 @@ export class EyeCurtain {
           const inside = fromTop ? edge - y : y - edge;
           const t = Math.max(0, Math.min(1, inside / 0.003));
           const b = t * t * (3 - 2 * t);
-          const z = Math.min(rim, rim * (1 - b) + this.front * b);
+          // never in front of the skin around it (at the corners the face curves back: a flat lid would stick out)
+          const skinBack = Math.min(e.rimTop[c], e.rimBottom[c]) - 0.0006;
+          const z = Math.min(rim, skinBack, rim * (1 - b) + this.front * b);
           v.set(x, y, z).applyMatrix4(this.toHead);
           p.setXYZ(c * ROWS + r, v.x, v.y, v.z);
         }
