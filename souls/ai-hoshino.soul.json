@@ -74,6 +74,7 @@
     "energy": 1.2,
     "tempo": 1.05,
     "bounce": 0.3,
-    "fidget": 0.45
+    "fidget": 0.45,
+    "armRelax": 0.8
   }
 }

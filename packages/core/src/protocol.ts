@@ -92,6 +92,8 @@ export interface MotionStyle {
   tempo?: number;
   bounce?: number;
   fidget?: number;
+  /** 0..1: arms that hang loosely (elbows a little bent, forearms swaying) instead of straight. */
+  armRelax?: number;
 }
 
 export interface VoiceHints {

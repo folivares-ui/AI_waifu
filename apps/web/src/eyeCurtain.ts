@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { CurtainEye } from "./synthFace";
+import { CURTAIN_MEET, type CurtainEye } from "./synthFace";
 
 /**
  * New eyelids for eyes that were never made to blink (the eyeball is part of the face mesh and the skin around
@@ -83,9 +83,9 @@ export class EyeCurtain {
       const k = end ? eye.xs.length - 1 : 0;
       const mid = (eye.top[k] + eye.bottom[k]) / 2;
       const half = (eye.top[k] - eye.bottom[k]) / 2;
-      for (let j = 1; j <= 4; j++) {
+      for (let j = 1; j <= 3; j++) {
         const x = eye.xs[k] + (end ? 1 : -1) * j * step;
-        const h = half * (1 - j / 5);
+        const h = half * (1 - j / 6); // (the hole's edge is steep at the corners: cover it fully)
         if (end) {
           eye.xs.push(x);
           eye.top.push(mid + h);
@@ -125,13 +125,13 @@ export class EyeCurtain {
     const mat = [faceMesh.material].flat()[0].clone();
     mat.side = THREE.DoubleSide;
     const c = new EyeCurtain(eye, head, mat, uvAbove, uvBelow);
-    c.apply(0, 0);
+    c.apply(0);
     return c;
   }
 
-  /** `upper` / `lower`: how far each lid has come (fraction of the eye's height at each column). */
-  apply(upper: number, lower: number) {
-    const key = `${upper.toFixed(3)},${lower.toFixed(3)}`;
+  /** `k`: how shut the eye is (0 open .. 1 closed). Both lids meet on a line a third of the way up the eye. */
+  apply(k: number) {
+    const key = k.toFixed(3);
     if (key === this.last) return;
     this.last = key;
     const e = this.eye;
@@ -142,14 +142,15 @@ export class EyeCurtain {
       const p = mesh.geometry.attributes.position as THREE.BufferAttribute;
       e.xs.forEach((x, c) => {
         const gap = e.top[c] - e.bottom[c];
+        const meet = e.bottom[c] + CURTAIN_MEET * gap;
         const edge = fromTop ? e.top[c] : e.bottom[c];
         // starts a little behind the edge of the opening, so no seam shows between skin and lid
         const start = edge + (fromTop ? 1 : -1) * Math.min(0.002, 0.08 * gap);
-        const end = edge + (fromTop ? -1 : 1) * amount * gap;
+        const end = edge + (meet - edge) * amount + (fromTop ? -1 : 1) * 0.0005 * (amount > 0.98 ? 1 : 0);
         for (let r = 0; r < ROWS; r++) {
           const y = start + ((end - start) * r) / (ROWS - 1);
           // in front of every layer of the eye (white, iris, highlights): its front-most point, plus a margin
-          const z = Math.max(this.front - 0.25 * Math.abs(y - this.midY) * 0, e.ballZ(x, y) ?? -Infinity) + 0.0012;
+          const z = Math.max(this.front, e.ballZ(x, y) ?? -Infinity) + 0.0012;
           v.set(x, y, z).applyMatrix4(this.toHead);
           p.setXYZ(c * ROWS + r, v.x, v.y, v.z);
         }
@@ -157,10 +158,8 @@ export class EyeCurtain {
       p.needsUpdate = true;
       mesh.geometry.computeVertexNormals();
     };
-    // the lower lid only rises to meet the upper one when the eye is nearly shut (a thin strip of skin over the
-    // bottom of the iris looks like a patch)
-    const meet = Math.max(0, Math.min(1, (upper - 0.6) / 0.25));
-    place(this.upper, upper, true);
-    place(this.lower, lower * meet, false);
+    place(this.upper, k, true);
+    const j = Math.max(0, Math.min(1, (k - 0.8) / 0.2));
+    place(this.lower, j * j * (3 - 2 * j), false); // the lower lid only joins at the very end
   }
 }

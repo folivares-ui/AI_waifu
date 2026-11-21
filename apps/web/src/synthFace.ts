@@ -236,7 +236,15 @@ interface Eye {
    * stretch over it, so the lids are new pieces of skin instead (see EyeCurtain) and the face is left as it is.
    */
   curtain?: boolean;
+  /** The hole of the face skin around the eye (its outline). */
+  hole?: V3[];
 }
+
+/** Morph target (not a rig channel) that sinks a new-lid eye's layers out of sight once it is shut. */
+export const EYE_HIDE = "_eyeHide";
+
+/** Where the new lids meet when the eye is shut, as a fraction of its height from the bottom. */
+export const CURTAIN_MEET = 0.35;
 
 /** What the app needs to draw the new eyelids of one eye (face frame). */
 export interface CurtainEye {
@@ -367,7 +375,7 @@ function findEye(meshes: FaceMeshIn[], comps: number[][][], center: V3, midX?: n
       }
     }
   }
-  const eye: Eye = { x0: gx0, top, bottom, gmax, ball: new Grid(gx0, gy0 - 0.01, gx1, gy1 + 0.01, true) };
+  const eye: Eye = { x0: gx0, top, bottom, gmax, ball: new Grid(gx0, gy0 - 0.01, gx1, gy1 + 0.01, true), hole: best.loop };
 
   // 4. Eyeball pieces (their surface is the back-most layer, in the middle of the opening), to keep lids in front.
   meshes.forEach((m, mi) => {
@@ -431,7 +439,7 @@ function lidWeight(e: Eye, p: V3, upper: boolean, rigid: boolean): { w: number; 
       const x1 = e.x0 + cols[cols.length - 1] * RES;
       const x = Math.min(x1, Math.max(x0, p[0]));
       o = openingAt(e, x);
-      fade = smooth(1 - (Math.abs(p[0] - x) - 0.15 * (x1 - x0)) / (0.5 * (x1 - x0))); // fully with it just past the corner
+      fade = e.curtain ? 1 : smooth(1 - (Math.abs(p[0] - x) - 0.15 * (x1 - x0)) / (0.5 * (x1 - x0))); // fully with it just past the corner
     }
   }
   if (!o || fade <= 0) return { w: 0, gap: 0, inside: 0 };
@@ -646,12 +654,49 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
   const mouth: (Float32Array | undefined)[] = meshes.map(() => undefined);
   let moved = 0;
 
+  // New-lid eyes: once shut, the eye's own layers sink behind the skin (out of sight, as in a closed anime eye)
+  const hide: (Float32Array | undefined)[] = meshes.map(() => undefined);
+  const centres = new Map<number[], V3>();
+  const pieceOf = new Map<string, number[]>();
+  const sink = (mi: number, i: number) => {
+    const a = (hide[mi] ??= new Float32Array(meshes[mi].pos.length));
+    // each piece shrinks to its own centre, behind the lids: no triangle is left to show through a gap
+    let c = pieceOf.get(`${mi}:${i}`);
+    if (!c) {
+      c = comps[mi].find((cc) => cc.includes(i)) ?? [i];
+      for (const k of c) pieceOf.set(`${mi}:${k}`, c);
+    }
+    let ctr = centres.get(c);
+    if (!ctr) {
+      const pts = c.map((k) => vtx(meshes[mi], k));
+      ctr = [pts.reduce((s, q) => s + q[0], 0) / pts.length, pts.reduce((s, q) => s + q[1], 0) / pts.length, Math.min(...pts.map((q) => q[2]))];
+      centres.set(c, ctr);
+    }
+    const p = vtx(meshes[mi], i);
+    a[i * 3] = ctr[0] - p[0];
+    a[i * 3 + 1] = ctr[1] - p[1];
+    a[i * 3 + 2] = ctr[2] - 0.01 - p[2];
+  };
   for (const { eye, face } of found) {
     meshes.forEach((m, mi) => {
       for (const c of comps[mi]) {
         const pts = c.map((i) => vtx(m, i));
         const isFace = mi === face && c === skinOf(comps[mi]); // the face skin itself (its biggest piece)
         if (isFace && eye.curtain) continue; // new lids cover the eye: the face skin stays put
+        if (!isFace && eye.curtain && mi === face) {
+          // new-lid eyes: whatever sits in the eye's lower part (socket walls showing at the corners, the lower
+          // lashes, the corner of the eye) sinks out of sight once the eye is shut
+          const { mn, mx } = bbox(pts);
+          const cols = [...eye.top.keys()].filter((k) => isFinite(eye.top[k]));
+          if (cols.length && !isBrow(eye, pts, 0.03) && mx[1] - mn[1] < eye.gmax) {
+            const ex0 = eye.x0 + cols[0] * RES;
+            const ex1 = eye.x0 + cols[cols.length - 1] * RES;
+            const cx = (mn[0] + mx[0]) / 2;
+            const cy = pts.reduce((a, q) => a + q[1], 0) / pts.length;
+            const q = openingAt(eye, Math.min(ex1, Math.max(ex0, cx)));
+            if (q && cx > ex0 - 0.015 && cx < ex1 + 0.015 && cy < q.bottom + CURTAIN_MEET * q.gap) for (const i of c) sink(mi, i);
+          }
+        }
         let rigid = false;
         if (!isFace) {
           // Pieces in front of the skin: lashes and eyeliner move with the lids; eyebrows, eyeballs and anything
@@ -672,7 +717,10 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
             // this the eye white can peek out at the corners, where the lid barely moves)
             // (eyeballs that are separate meshes sit well behind the lid: only their corners need it)
             const cornersOnly = mi !== face;
-            if (eye.curtain) continue;
+            if (eye.curtain) {
+              for (const i of c) sink(mi, i);
+              continue;
+            }
             const cols = [...eye.top.keys()].filter((i) => isFinite(eye.top[i]));
             if (cols.length) {
               const ex0 = eye.x0 + cols[0] * RES;
@@ -704,7 +752,15 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
             // Whatever hangs into the opening (the lid's own rim, the lower strip of the lashes) ends up squashed
             // against the closed lid line instead of sticking out below it.
             let dy = (isUpper ? -1 : 1) * (inside > 0 ? gap - 0.85 * inside : w * gap);
-            if (rigid && isUpper && lw.top !== undefined && lw.bottom !== undefined) {
+            if (rigid && eye.curtain && lw.top !== undefined && lw.bottom !== undefined) {
+              // New lids (see EyeCurtain): both meet on a curved line a third of the way up the eye, like an
+              // anime eye drawn closed; the upper lashes become that line, the lower ones tuck under it.
+              const g = lw.top - lw.bottom;
+              const meet = lw.bottom + CURTAIN_MEET * g;
+              const target = isUpper ? meet + 0.25 * Math.max(0, p[1] - lw.top) : meet - 0.25 * Math.max(0, lw.bottom - p[1]) - 0.001;
+              dy = isUpper ? (target - p[1]) * (lw.fade ?? 1) : 0;
+              if (!isUpper) sink(mi, i); // the lower lashes stay until the eye is shut, then go: one line stays
+            } else if (rigid && isUpper && lw.top !== undefined && lw.bottom !== undefined) {
               // Upper lashes and eyeliner all gather on the closed line (also at the corners, where the opening is
               // narrow: otherwise the sides of the eye's outline stay up as strokes), keeping a little thickness.
               const g = lw.top - lw.bottom;
@@ -732,6 +788,7 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
   }
 
   const extra: Record<string, (Float32Array | undefined)[]> = {};
+  if (hide.some(Boolean)) extra[EYE_HIDE] = hide;
   const put = (channel: string, mi: number, i: number, x: number, y: number, z: number) => {
     const arr = ((extra[channel] ??= meshes.map(() => undefined))[mi] ??= new Float32Array(meshes[mi].pos.length));
     arr[i * 3] += x;
@@ -817,6 +874,27 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
     .filter((f) => f.eye.curtain)
     .map(({ eye, face }) => {
       const idx = [...eye.top.keys()].filter((i) => isFinite(eye.top[i]));
+      // The lids cover the whole hole of the skin (at the corners it is wider than the opening one sees, and
+      // the inside of the eye would show there once the lids are shut): per 0.5 mm column, the opening where
+      // it is known, else the hole's own outline.
+      const hole = eye.hole ?? [];
+      const hx0 = Math.min(eye.x0 + idx[0] * RES, ...hole.map((q) => q[0]));
+      const hx1 = Math.max(eye.x0 + idx[idx.length - 1] * RES, ...hole.map((q) => q[0]));
+      const xs: number[] = [];
+      const tops: number[] = [];
+      const bottoms: number[] = [];
+      for (let x = hx0; x <= hx1 + 1e-9; x += RES) {
+        const o = openingAt(eye, x);
+        const near = hole.filter((q) => Math.abs(q[0] - x) < 0.0012);
+        const ht = near.length ? Math.max(...near.map((q) => q[1])) : undefined;
+        const hb = near.length ? Math.min(...near.map((q) => q[1])) : undefined;
+        const t = o ? o.top : ht;
+        const b = o ? (hb !== undefined ? Math.min(o.bottom, Math.max(hb, o.bottom - 0.003)) : o.bottom) : hb;
+        if (t === undefined || b === undefined || t - b < 0.0005) continue;
+        xs.push(x);
+        tops.push(t);
+        bottoms.push(b);
+      }
       // plain skin: the face skin vertex nearest to a point well above the eye (forehead), in front
       const fm = meshes[face];
       const skin = skinOf(comps[face]);
@@ -832,9 +910,9 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
       return {
         skinVertex,
         face,
-        xs: idx.map((i) => eye.x0 + i * RES),
-        top: idx.map((i) => eye.top[i]),
-        bottom: idx.map((i) => eye.bottom[i]),
+        xs,
+        top: tops,
+        bottom: bottoms,
         gmax: eye.gmax,
         ballZ: (x: number, y: number) => eye.ball.get(x, y),
       };
@@ -1053,7 +1131,14 @@ export class SynthFace {
   }
 
   apply(w: LidWeights) {
-    const { upper, lower } = SynthFace.lids(w);
+    let { upper, lower } = SynthFace.lids(w);
+    if (this.curtains.length) {
+      // new lids: one "closedness" drives both, the lower lid joining only near the end (see EyeCurtain)
+      const k = Math.max(0, Math.min(1, upper / 0.9));
+      upper = k;
+      lower = k * k * k;
+      w = { ...w, [EYE_HIDE]: smooth((k - 0.86) / 0.1) };
+    }
     const open = Math.max(0, w.mouthOpen ?? 0);
     for (const s of this.slots) {
       const inf = s.mesh.morphTargetInfluences;
@@ -1063,6 +1148,6 @@ export class SynthFace {
       if (s.mouth !== undefined) inf[s.mouth] = open;
       for (const [c, k] of s.extra) inf[k] = w[c] ?? 0;
     }
-    for (const c of this.curtains) c.apply(upper, lower);
+    for (const c of this.curtains) c.apply(upper);
   }
 }

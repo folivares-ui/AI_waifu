@@ -112,6 +112,17 @@ export function bodyPose(s: BodyState): BodyPose {
   pose.rightUpperArm = add(pose.rightUpperArm, [0.03 * energy * Math.sin(t * 0.7 + 1.3), 0, -sway]);
   pose.leftLowerArm = add(pose.leftLowerArm, [0, -0.05 * energy * (1 + Math.sin(t * 0.9)), 0]);
   pose.rightLowerArm = add(pose.rightLowerArm, [0, 0.05 * energy * (1 + Math.sin(t * 0.9 + 0.8)), 0]);
+  // Loose arms: elbows a little bent and the forearms swinging on their own (slightly out of step).
+  const relax = s.style?.armRelax ?? 0;
+  if (relax > 0) {
+    const swing = (ph: number) => 0.22 * relax + 0.07 * relax * Math.sin(t * 1.1 + ph) + 0.03 * relax * Math.sin(t * 2.3 + ph * 2);
+    pose.leftLowerArm = add(pose.leftLowerArm, [0, -swing(0), 0]);
+    pose.rightLowerArm = add(pose.rightLowerArm, [0, swing(1.7), 0]);
+    pose.leftUpperArm = add(pose.leftUpperArm, [0.06 * relax * Math.sin(t * 0.9 + 0.4), 0, 0]);
+    pose.rightUpperArm = add(pose.rightUpperArm, [0.06 * relax * Math.sin(t * 0.9 + 2.1), 0, 0]);
+    pose.leftHand = add(pose.leftHand, [0, 0, 0.12 * relax * Math.sin(t * 1.3)]);
+    pose.rightHand = add(pose.rightHand, [0, 0, -0.12 * relax * Math.sin(t * 1.3 + 1.1)]);
+  }
   pose.leftShoulder = add(pose.leftShoulder, [0, 0, 0.02 * energy * breath]);
   pose.rightShoulder = add(pose.rightShoulder, [0, 0, -0.02 * energy * breath]);
   // The torso is alive too: a slow twist and side sway (more with energy).
@@ -215,7 +226,7 @@ export const FINGER_NAMES = ["Thumb", "Index", "Middle", "Ring", "Little"] as co
  * and each finger drifts slowly on its own so the hands never look frozen.
  */
 export function fingerCurl(s: { t: number; emotion: Emotion; speaking: boolean; level: number; waving?: boolean }): Record<(typeof FINGER_NAMES)[number], number> {
-  const base: Record<Emotion, number> = { neutral: 0.32, happy: 0.18, sad: 0.4, angry: 0.85, surprised: 0.12, thinking: 0.45, shy: 0.5 };
+  const base: Record<Emotion, number> = { neutral: 0.2, happy: 0.1, sad: 0.28, angry: 0.8, surprised: 0.08, thinking: 0.3, shy: 0.32 };
   const b = s.waving ? 0.08 : base[s.emotion];
   const talk = s.speaking ? 0.06 * Math.sin(s.t * 2.1) + 0.05 * Math.min(1, s.level * 2) : 0;
   const drift = (k: number) => 0.04 * Math.sin(s.t * (0.37 + k * 0.11) + k * 1.7);
@@ -228,4 +239,4 @@ export function fingerCurl(s: { t: number; emotion: Emotion; speaking: boolean; 
 }
 
 /** Rotation (radians) of each finger segment for a curl of 1: the base bends less than the middle joint. */
-export const FINGER_SEGMENT_BEND = { Metacarpal: 0.25, Proximal: 1.1, Intermediate: 1.45, Distal: 0.9 } as const;
+export const FINGER_SEGMENT_BEND = { Metacarpal: 0.25, Proximal: 1.0, Intermediate: 1.2, Distal: 0.7 } as const;

@@ -176,8 +176,55 @@ function bodyColliders(vrm: VRM): VRMSpringBoneCollider[] {
   };
   attach("head", new VRMSpringBoneColliderShapeSphere({ radius: 0.062 * size, offset: new THREE.Vector3(0, 0.05 * size, 0.005 * size) }));
   attach("neck", new VRMSpringBoneColliderShapeSphere({ radius: 0.03 * size }));
-  attach("upperChest", new VRMSpringBoneColliderShapeCapsule({ radius: 0.075 * size, offset: new THREE.Vector3(0, 0, 0), tail: toward("upperChest", "chest", 1.2) }));
-  attach("chest", new VRMSpringBoneColliderShapeCapsule({ radius: 0.07 * size, offset: new THREE.Vector3(0, 0, 0), tail: toward("chest", "hips", 1) }));
+  // The torso, measured on her own mesh: at several heights, its width and depth around the body's middle line
+  // (vertices that follow the spine bones). Each slice becomes spheres side by side filling that ellipse.
+  const core = ["hips", "spine", "chest", "upperChest"].map((n) => H.getRawBoneNode(n as never)).filter((b): b is THREE.Object3D => !!b);
+  const hipsY = core[0]?.getWorldPosition(new THREE.Vector3()).y ?? 0.8;
+  const neckY = (H.getRawBoneNode("neck") ?? H.getRawBoneNode("head"))?.getWorldPosition(new THREE.Vector3()).y ?? hipsY + 0.5;
+  const SL = 6;
+  const slices: { xs: number[]; zs: number[] }[] = Array.from({ length: SL }, () => ({ xs: [], zs: [] }));
+  const coreSet = new Set(core);
+  vrm.scene.updateMatrixWorld(true);
+  const v = new THREE.Vector3();
+  vrm.scene.traverse((o) => {
+    const m = o as THREE.SkinnedMesh;
+    if (!m.isSkinnedMesh || !m.visible) return;
+    const pos = m.geometry.attributes.position, si = m.geometry.attributes.skinIndex, sw = m.geometry.attributes.skinWeight;
+    if (!si || !sw) return;
+    for (let i = 0; i < pos.count; i += 2) {
+      let best = 0;
+      for (let k = 1; k < 4; k++) if (sw.getComponent(i, k) > sw.getComponent(i, best)) best = k;
+      if (!coreSet.has(m.skeleton.bones[si.getComponent(i, best)])) continue;
+      m.getVertexPosition(i, v).applyMatrix4(m.matrixWorld);
+      const f = (v.y - hipsY) / (neckY - hipsY);
+      if (f < 0 || f >= 1) continue;
+      const sl = slices[Math.floor(f * SL)];
+      sl.xs.push(v.x);
+      sl.zs.push(v.z);
+    }
+  });
+  const pct = (a: number[], q: number) => [...a].sort((x, y) => x - y)[Math.floor(q * (a.length - 1))];
+  const hipsBone = core[0];
+  slices.forEach((sl, k) => {
+    if (sl.xs.length < 20 || !hipsBone) return;
+    const x0 = pct(sl.xs, 0.04), x1 = pct(sl.xs, 0.96), z0 = pct(sl.zs, 0.04), z1 = pct(sl.zs, 0.96);
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, hx = (x1 - x0) / 2, hz = (z1 - z0) / 2;
+    const r = Math.min(hx, hz) * 1.05;
+    const y = hipsY + ((k + 0.5) / SL) * (neckY - hipsY);
+    const n = Math.max(1, Math.round(hx / r));
+    // which bone carries this height (so the spheres bend with her)
+    const bone = core.reduce((a, b) => (b.getWorldPosition(new THREE.Vector3()).y <= y ? b : a), core[0]);
+    const bw = bone.getWorldPosition(new THREE.Vector3());
+    const q = bone.getWorldQuaternion(new THREE.Quaternion()).invert();
+    for (let j = 0; j < n; j++) {
+      const x = n === 1 ? cx : cx - hx + r + (j * (2 * hx - 2 * r)) / (n - 1);
+      const offset = new THREE.Vector3(x, y, cz).sub(bw).applyQuaternion(q);
+      const c = new VRMSpringBoneCollider(new VRMSpringBoneColliderShapeSphere({ radius: r, offset }));
+      c.scale.setScalar(1 / (bone.getWorldScale(new THREE.Vector3()).x || 1));
+      bone.add(c);
+      out.push(c);
+    }
+  });
   attach("hips", new VRMSpringBoneColliderShapeSphere({ radius: 0.09 * size }));
   for (const s of ["left", "right"]) attach(`${s}UpperArm`, new VRMSpringBoneColliderShapeCapsule({ radius: 0.03 * size, tail: toward(`${s}UpperArm`, `${s}LowerArm`) }));
   return out;
