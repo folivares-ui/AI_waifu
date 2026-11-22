@@ -152,7 +152,7 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
   }
   // Chains named by part ("hair FA01", "Clothes Skirt CSA.001.L", "Clothes Veil ...", "Clothes Tail FB02.L"):
   // each one swings from its root, with the body as obstacles.
-  const NAMED = /^(hair|clothes[ _](tail|skirt|flap|veil|acc|cloth|wings))/i; // (three.js turns spaces into "_")
+  const NAMED = /^(hair|clothes[ _](tail|skirt|flap|veil|acc|cloth))/i; // (not wings: they hold their shape) // (three.js turns spaces into "_")
   const base = (n: string) => n.replace(/(_\d+)+$/, "");
   const isLink = (o: THREE.Object3D) => NAMED.test(base(o.name)) && !/_end/.test(o.name);
   const roots: THREE.Object3D[] = [];
@@ -166,7 +166,16 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
       const kids = o.children.filter(isLink);
       const next = kids[0] ?? o.children.find((c) => /_end/.test(c.name)) ?? null;
       const cloth = /clothes/i.test(o.name);
-      mgr.addJoint(new VRMSpringBoneJoint(o, next, { stiffness: cloth ? 0.9 : 0.6, dragForce: 0.4, gravityPower: cloth ? 0.15 : 0.3, gravityDir: new THREE.Vector3(0, -1, 0), hitRadius: (cloth ? 0.015 : 0.02) * size }, [group]));
+      // Keep the shape the artist gave it: a link that does not hang down (a lock swept up or out, a flared
+      // skirt) would collapse under gravity, so the further from "down" it points, the stiffer and lighter it is.
+      let hang = 1;
+      if (next) {
+        const d = next.getWorldPosition(new THREE.Vector3()).sub(o.getWorldPosition(new THREE.Vector3())).normalize();
+        hang = Math.max(0, -d.y); // 1 straight down .. 0 horizontal or up
+      }
+      const stiffness = (cloth ? 2.2 : 1.6) + (1 - hang) * 3;
+      const gravityPower = (cloth ? 0.04 : 0.08) * hang * hang;
+      mgr.addJoint(new VRMSpringBoneJoint(o, next, { stiffness, dragForce: 0.45, gravityPower, gravityDir: new THREE.Vector3(0, -1, 0), hitRadius: (cloth ? 0.015 : 0.02) * size }, [group]));
       count++;
       for (const k of kids) walk(k);
     };
