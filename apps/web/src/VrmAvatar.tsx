@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 import type { Emotion, LookStyle, MotionStyle, TouchRegion } from "@waifu/core";
-import { addSpringChains, faceFraming, fullFraming, hideHelperMeshes, setToonBrightness, standUpright, toonify } from "./avatarFixups";
+import { addSpringChains, faceFraming, fullFraming, hideHelperMeshes, meshLyingDown, setToonBrightness, standUpright, toonify } from "./avatarFixups";
 import { collectParts } from "./modelParts";
 import { BODY_BONES, FINGER_NAMES, FINGER_SEGMENT_BEND, bodyPose, fingerCurl } from "./bodyMotion";
 import { solveArmPoses, type ArmSolutions } from "./armIK";
@@ -158,6 +158,10 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         VRMUtils.combineSkeletons(gltf.scene);
         VRMUtils.rotateVRM0(v); // no-op for VRM 1.0, turns VRM 0.x models to face the camera
         standUpright(v); // converted models can come lying down or facing away
+        if (meshLyingDown(v)) {
+          console.warn("[avatar] the body mesh does not stand like its skeleton (re-rigged model?)");
+          window.dispatchEvent(new CustomEvent("waifu:avatar-problem", { detail: "Este modelo tiene el cuerpo tumbado respecto a su esqueleto (pasa con algunas herramientas de auto-rigging). Carga el modelo original: la app reconoce sola sus huesos." }));
+        }
         scene.add(v.scene);
         // Repairs for models converted from other formats (no-ops for proper VRM models).
         const hidden = hideHelperMeshes(v);

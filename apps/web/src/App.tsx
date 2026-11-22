@@ -26,6 +26,12 @@ export function App() {
   const [headphones, setHeadphones] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<string>();
   const [voiceHint, setVoiceHint] = useState<string>();
+  // problems the avatar finds in a model (e.g. a re-rigged file whose body lies down)
+  useEffect(() => {
+    const on = (e: Event) => setVoiceHint((e as CustomEvent<string>).detail);
+    window.addEventListener("waifu:avatar-problem", on);
+    return () => window.removeEventListener("waifu:avatar-problem", on);
+  }, []);
   const voiceWarned = useRef(false);
   const [chosenSpokenLang, setSpokenLang] = useState(storedSpeechLang);
   const spokenLangRef = useRef("es-ES");

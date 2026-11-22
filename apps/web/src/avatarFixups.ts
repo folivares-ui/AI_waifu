@@ -360,6 +360,35 @@ export function standUpright(vrm: VRM): boolean {
   return turned;
 }
 
+/**
+ * True when the body mesh, as it is drawn, does not stand like its skeleton (it is deeper than it is tall):
+ * some re-rigging tools put an upright skeleton on a mesh that is still lying down.
+ */
+export function meshLyingDown(vrm: VRM): boolean {
+  vrm.scene.updateMatrixWorld(true);
+  const ys: number[] = [];
+  const zs: number[] = [];
+  const t = new THREE.Vector3();
+  vrm.scene.traverse((o) => {
+    const m = o as THREE.SkinnedMesh;
+    if (!m.isSkinnedMesh || !m.visible) return;
+    const P = m.geometry.attributes.position;
+    for (let i = 0; i < P.count; i += 9) {
+      m.getVertexPosition(i, t);
+      m.localToWorld(t);
+      ys.push(t.y);
+      zs.push(t.z);
+    }
+  });
+  if (ys.length < 100) return false;
+  // 2nd..98th percentile: a cape, a whip or a few stray points must not count (upright models measure <= 0.5)
+  const span = (a: number[]) => {
+    const s2 = [...a].sort((x, y) => x - y);
+    return s2[Math.floor(0.98 * (s2.length - 1))] - s2[Math.floor(0.02 * (s2.length - 1))];
+  };
+  return span(zs) > 1.0 * span(ys);
+}
+
 /** Close-up for icons: the face, plus hat/ears when the model has them. */
 export function faceFraming(vrm: VRM, headY: number, fovDeg: number): { y: number; dist: number } {
   const top = new THREE.Box3().setFromObject(vrm.scene).max.y;
