@@ -147,6 +147,11 @@ export class BoneFaceRig {
       const head = vrm.humanoid.getRawBoneNode("head");
       if (head) for (const m of geometryMovesF(head, candidates)) add(m.channel, m.node, m);
     }
+    // Family 6: "head eyelid upper left 1..3", "head eyebrow left 1..3", "head mouth corner left", "head jaw"...
+    if (this.channels.size === 0) {
+      const head = vrm.humanoid.getRawBoneNode("head");
+      if (head) for (const m of geometryMovesParts(head, candidates)) add(m.channel, m.node, m);
+    }
     // Family 4: "Facial_Elbow_A_01_L" (eyebrows), "Facial_Mouth_A_01_L/M/R", "Facial_Cheek_A_01_L"... and no
     // eyelid or jaw bones: those two are built from the face mesh itself (synthFace.ts).
     if (this.channels.size === 0) {
@@ -426,5 +431,122 @@ export function geometryMovesFacial(head: THREE.Object3D, nodes: THREE.Object3D[
     mm("eyeSmile", cheek, 0, 2, 0);
   }
   mm("mouthPout", one(/^Facial Mouth A 01 M$/), 0, 0.8, 1.6);
+  return out;
+}
+
+// ---------- family 6: "head eyelid upper left 1", "head eyebrow left 2", "head mouth corner left", "head jaw" ------
+
+/** "head eyelid upper left 1_0352" -> "head eyelid upper left 1". */
+// (three.js turns spaces into "_", so only the exporter's own last "_NNN" is an index to drop)
+const famP = (n: string) => n.replace(/_\d+$/, "").replace(/_/g, " ").trim().toLowerCase();
+
+/**
+ * Faces rigged with descriptive names: upper and lower eyelid bones (1..3 along the lid, plus inner/outer
+ * corners), eyebrows 1..3, mouth corners, upper/lower lips, jaw, cheeks. As in family 2, each movement is
+ * measured on the model: a blink brings every upper-lid bone down to the lower lid below it.
+ */
+export function geometryMovesParts(head: THREE.Object3D, nodes: THREE.Object3D[]): GeoMove[] {
+  head.updateMatrixWorld(true);
+  const origin = head.getWorldPosition(new THREE.Vector3());
+  const pos = (o: THREE.Object3D) => o.getWorldPosition(new THREE.Vector3()).sub(origin).multiplyScalar(1000); // mm
+  const find = (re: RegExp) => nodes.filter((o) => re.test(famP(o.name)) && !/end$/.test(famP(o.name)));
+  const one = (re: RegExp) => find(re)[0];
+  const out: GeoMove[] = [];
+  const mm = (channel: Channel, node: THREE.Object3D | undefined, x: number, y: number, z: number) => {
+    if (node) out.push({ channel, node, mm: [x, y, z] });
+  };
+  for (const side of ["left", "right"]) {
+    const upper = find(new RegExp(`^head eyelid upper ${side} \\d$`));
+    const lower = find(new RegExp(`^head eyelid lower ${side} \\d$`));
+    if (upper.length < 2 || lower.length < 2) continue;
+    const corners = find(new RegExp(`^head eyelid corner (inner|outer) ${side}$`));
+    const line = [...lower, ...corners].map((o) => pos(o)).sort((a, b) => a.x - b.x);
+    const lowerY = (x: number) => {
+      if (x <= line[0].x) return line[0].y;
+      for (let i = 1; i < line.length; i++) {
+        if (x <= line[i].x) {
+          const t = (x - line[i - 1].x) / (line[i].x - line[i - 1].x || 1);
+          return line[i - 1].y + t * (line[i].y - line[i - 1].y);
+        }
+      }
+      return line[line.length - 1].y;
+    };
+    // Lid bones either sit on the lid (they move down) or all start at the eye's centre and point at the lid
+    // (they turn about it, as a real eyelid does). Their tips tell where the lid is.
+    const tip = (o: THREE.Object3D) => {
+      const end = o.children.find((c) => /end/i.test(c.name));
+      return end ? pos(end) : pos(o);
+    };
+    const pivoted = upper.every((o) => tip(o).distanceTo(pos(o)) > 3) && Math.abs(pos(upper[0]).y - pos(lower[0]).y) < 2;
+    const lowTip = (x: number) => lower.map(tip).reduce((a, b) => (Math.abs(b.x - x) < Math.abs(a.x - x) ? b : a));
+    const gaps = upper.map((o) => Math.max(0, tip(o).y - lowTip(tip(o).x).y));
+    const meanGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    if (pivoted) {
+      // angle of a tip seen from the pivot, in the side (y-z) plane; a turn of +a about +x lowers it by a
+      const ang = (o: THREE.Object3D, t: THREE.Vector3) => Math.atan2(t.y - pos(o).y, t.z - pos(o).z);
+      const turn = (channel: Channel, o: THREE.Object3D, a: number) => out.push({ channel, node: o, rot: [-a, 0, 0] });
+      upper.forEach((o) => {
+        const d = ang(o, lowTip(tip(o).x)) - ang(o, tip(o)); // negative: the lid comes down
+        turn("blink", o, 0.92 * d);
+        turn("eyeSmile", o, 0.55 * d);
+        turn("squint", o, 0.42 * d);
+        turn("eyeWide", o, -0.12 * d);
+      });
+      lower.forEach((o) => {
+        const up = upper.reduce((a, b) => (Math.abs(tip(b).x - tip(o).x) < Math.abs(tip(a).x - tip(o).x) ? b : a));
+        const d = ang(o, tip(up)) - ang(o, tip(o)); // positive: the lid comes up
+        turn("blink", o, 0.1 * d);
+        turn("eyeSmile", o, 0.25 * d);
+        turn("squint", o, 0.15 * d);
+        turn("eyeWide", o, -0.05 * d);
+      });
+    } else {
+      upper.forEach((o, i) => {
+        mm("blink", o, 0, -0.85 * gaps[i], 0);
+        mm("eyeSmile", o, 0, -0.5 * gaps[i], 0);
+        mm("eyeWide", o, 0, 0.15 * meanGap, 0);
+        mm("squint", o, 0, -0.4 * gaps[i], 0);
+      });
+      for (const o of lower) {
+        mm("blink", o, 0, 0.12 * meanGap, 0);
+        mm("eyeSmile", o, 0, 0.3 * meanGap, 0);
+        mm("eyeWide", o, 0, -0.08 * meanGap, 0);
+        mm("squint", o, 0, 0.18 * meanGap, 0);
+      }
+    }
+    // eyebrows: 1..3, inner = closest to the nose
+    const brows = find(new RegExp(`^head eyebrow ${side} \\d$`)).sort((a, b) => Math.abs(pos(a).x) - Math.abs(pos(b).x));
+    const unit = Math.max(3, Math.min(7, meanGap * 0.45));
+    const inward = -Math.sign(pos(brows[0] ?? upper[0]).x) || 1;
+    brows.forEach((o, i) => {
+      const t = brows.length > 1 ? i / (brows.length - 1) : 0;
+      const inn = Math.pow(1 - t, 1.5);
+      mm("browUp", o, 0, unit * (1 + 0.35 * Math.sin(Math.PI * t)), 0);
+      mm("browAngry", o, inward * unit * 0.3 * (1 - t), unit * (-1.2 * inn + 0.6 * t), 0);
+      mm("browSad", o, inward * unit * 0.2 * (1 - t), unit * (1.2 * inn - 0.5 * t), 0);
+      mm("browFurrow", o, inward * unit * 0.45 * (1 - t), -unit * 0.25 * (1 - t), 0);
+    });
+    // mouth corner and cheek
+    const corner = one(new RegExp(`^head mouth corner ${side}$`));
+    if (corner) {
+      const o = Math.sign(pos(corner).x) || 1;
+      mm("mouthSmile", corner, o * 1.5, 3, 0);
+      mm("mouthFrown", corner, 0, -2.6, 0);
+      mm("mouthNarrow", corner, -o * 2.5, 0, 0);
+      mm("mouthWide", corner, o * 2.5, 0.4, 0);
+      mm("mouthPout", corner, 0, -2, 0);
+    }
+    const cheek = one(new RegExp(`^head cheek ${side} 1$`));
+    mm("mouthSmile", cheek, 0, 1.5, 0);
+    mm("eyeSmile", cheek, 0, 1.5, 0);
+  }
+  for (const o of find(/^head lips lower (middle|left 1|right 1)$/)) mm("mouthPout", o, 0, 1.2, 1.6);
+  // jaw: rotating it opens the mouth (the lower lip hangs from it): ~11 mm at the lower lip
+  const jaw = one(/^head jaw$/);
+  if (jaw) {
+    const lip = one(/^head lips lower middle$/);
+    const reach = lip ? Math.max(30, Math.hypot(pos(lip).y - pos(jaw).y, pos(lip).z - pos(jaw).z)) : 90;
+    out.push({ channel: "mouthOpen", node: jaw, rot: [11 / reach, 0, 0] });
+  }
   return out;
 }

@@ -194,3 +194,31 @@ describe("models with unreadable bone names and a lost scale", () => {
     expect(fixVrm(r.fixed)).toBeUndefined(); // bones filled in and the right size: nothing left to do
   });
 });
+
+describe("bones named by body part ('leg left thigh', 'arm right elbow', 'head neck upper')", () => {
+  it("recognises them, skips helper bones, and finds the hips where spine and legs meet", async () => {
+    const { guessHumanoidByParts } = await import("./vrmfix.js");
+    const names = ["root hips_010", "spine lower_0200", "spine middle_0201", "spine upper_0202", "head neck lower_0222", "head neck upper_0224", "leg left thigh_025", "leg left knee_027", "leg left ankle_029", "leg right thigh_032", "leg right knee_034", "leg right ankle_036", "arm left shoulder 1_0444", "arm left shoulder 2 ctrl_0445", "arm left shoulder 2_0447", "arm left elbow_0449", "arm left wrist_0451", "arm left finger 1a_0457", "unused DEF-thigh.L.001_026"];
+    const nodes: { name: string; children?: number[] }[] = names.map((name) => ({ name }));
+    nodes[0].children = [1, 6, 9];
+    nodes[1].children = [2];
+    nodes[2].children = [3];
+    nodes[3].children = [4, 12];
+    nodes[4].children = [5];
+    nodes[6].children = [7, 18];
+    nodes[7].children = [8];
+    nodes[9].children = [10];
+    nodes[10].children = [11];
+    nodes[12].children = [13, 14];
+    nodes[14].children = [15];
+    nodes[15].children = [16];
+    nodes[16].children = [17];
+    const map = guessHumanoidByParts(nodes, new Set());
+    const named = Object.fromEntries(Object.entries(map).map(([b, i]) => [b, names[i]]));
+    expect(named).toMatchObject({
+      hips: "root hips_010", spine: "spine lower_0200", chest: "spine middle_0201", upperChest: "spine upper_0202", neck: "head neck lower_0222", head: "head neck upper_0224",
+      leftUpperLeg: "leg left thigh_025", leftLowerLeg: "leg left knee_027", leftFoot: "leg left ankle_029", rightFoot: "leg right ankle_036",
+      leftShoulder: "arm left shoulder 1_0444", leftUpperArm: "arm left shoulder 2_0447", leftLowerArm: "arm left elbow_0449", leftHand: "arm left wrist_0451", leftThumbMetacarpal: "arm left finger 1a_0457",
+    });
+  });
+});

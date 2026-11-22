@@ -16,7 +16,7 @@ const setup = () => {
 };
 
 describe("characters", () => {
-  it("ships Rice Shower (default), Agnes Tachyon, Ai Hoshino, Rebecca, Midnight, Caulifla and Nicole; old example souls are hidden", () => {
+  it("ships Rice Shower (default), Agnes Tachyon, Ai Hoshino, Rebecca, Midnight, Caulifla, Nicole and Ronova; old example souls are hidden", () => {
     const { c } = setup();
     const list = c.list();
     expect(list.map((x) => [x.id, x.name, x.builtIn])).toEqual([
@@ -27,6 +27,7 @@ describe("characters", () => {
       ["midnight", "Midnight", true],
       ["nicole", "Nicole", true],
       ["rebecca", "Rebecca", true],
+      ["ronova", "Ronova", true],
     ]);
     expect(c.load("nicole").owner?.honorific).toBe("Proxy");
     expect(c.load("nicole").look).toEqual({ brightness: 0.78 }); // only her model is drawn darker

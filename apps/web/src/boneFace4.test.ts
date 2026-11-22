@@ -170,3 +170,38 @@ describe("faces with no bones at all (eyebrows and mouth shapes from the mesh)",
   });
 });
 
+
+describe("face rig family 6 (descriptive names, lid bones turning about the eye's centre)", () => {
+  it("turns the upper lids down to the lower ones", async () => {
+    const { geometryMovesParts } = await import("./boneFace");
+    const head = new THREE.Object3D();
+    head.name = "head_neck_upper_0224";
+    const bone = (name: string, at: V3, tip?: V3) => {
+      const o = new THREE.Object3D();
+      o.name = name;
+      o.position.set(...at);
+      head.add(o);
+      if (tip) {
+        const e = new THREE.Object3D();
+        e.name = name.replace(/_\d+$/, "") + "_end_1";
+        e.position.set(tip[0] - at[0], tip[1] - at[1], tip[2] - at[2]);
+        o.add(e);
+      }
+      return o;
+    };
+    const c: V3 = [0.03, 0.05, 0.02]; // the eye's centre: every lid bone starts here
+    const up = bone("head_eyelid_upper_left_2_0374", c, [0.03, 0.062, 0.03]);
+    bone("head_eyelid_upper_left_1_0352", c, [0.022, 0.06, 0.03]);
+    bone("head_eyelid_lower_left_2_0381", c, [0.03, 0.04, 0.03]);
+    bone("head_eyelid_lower_left_1_0379", c, [0.022, 0.042, 0.03]);
+    bone("head_jaw_0326", [0, 0, 0.01]);
+    const nodes: THREE.Object3D[] = [];
+    head.traverse((o) => nodes.push(o));
+    const moves = geometryMovesParts(head, nodes);
+    const blink = moves.find((m) => m.channel === "blink" && m.node === up) as { rot: number[] };
+    // turning the tip (12 mm above, 10 mm in front) to the lower tip (10 mm below): about +98 degrees about +x
+    expect(blink.rot[0]).toBeGreaterThan(1.3);
+    expect(blink.rot[0]).toBeLessThan(1.9);
+    expect(moves.some((m) => m.channel === "mouthOpen")).toBe(true);
+  });
+});

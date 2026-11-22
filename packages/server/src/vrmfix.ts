@@ -163,6 +163,56 @@ export function guessHumanoid(nodes: GltfNode[], joints: Set<number>): Record<st
   return out;
 }
 
+/**
+ * Bones named by body part, side and position, e.g. "leg left thigh", "arm right elbow", "arm left finger 2b",
+ * "spine lower", "head neck upper" (rigs exported from some game-model tools). Helper bones ("unused", "ctrl",
+ * twist) are ignored. Returns VRM 1.0 bone names -> node index.
+ */
+export function guessHumanoidByParts(nodes: GltfNode[], joints: Set<number>): Record<string, number> {
+  const parent = new Map<number, number>();
+  nodes.forEach((n, i) => n.children?.forEach((c) => parent.set(c, i)));
+  const clean = (n: string) => n.replace(/(_\d+)+$/, "").toLowerCase().trim();
+  const all = nodes
+    .map((n, i) => ({ i, n: clean(n.name ?? "") }))
+    .filter((x) => (joints.size === 0 || joints.has(x.i)) && !/unused|ctrl|twist|_end|\bend\b|mch|org|def/.test(x.n));
+  const find = (re: RegExp) => all.find((x) => re.test(x.n))?.i;
+  const out: Record<string, number> = {};
+  const put = (bone: string, i: number | undefined) => i !== undefined && (out[bone] = i);
+  put("spine", find(/^spine lower$/));
+  put("chest", find(/^spine middle$/));
+  put("upperChest", find(/^spine upper$/));
+  put("neck", find(/^head neck lower$/));
+  put("head", find(/^head neck upper$/));
+  for (const [s, side] of [["left", "left"], ["right", "right"]] as const) {
+    put(`${s}UpperLeg`, find(new RegExp(`^leg ${side} thigh$`)));
+    put(`${s}LowerLeg`, find(new RegExp(`^leg ${side} knee$`)));
+    put(`${s}Foot`, find(new RegExp(`^leg ${side} ankle$`)));
+    put(`${s}Toes`, find(new RegExp(`^leg ${side} toes$`)));
+    put(`${s}Shoulder`, find(new RegExp(`^arm ${side} shoulder 1$`)));
+    put(`${s}UpperArm`, find(new RegExp(`^arm ${side} shoulder 2$`)));
+    put(`${s}LowerArm`, find(new RegExp(`^arm ${side} elbow$`)));
+    put(`${s}Hand`, find(new RegExp(`^arm ${side} wrist$`)));
+    put(`${s}Eye`, find(new RegExp(`^head eyeball ${side}$`)));
+    // finger 1 = thumb .. 5 = little; a/b/c = the three segments
+    const F: [string, string[]][] = [["Thumb", ["Metacarpal", "Proximal", "Distal"]], ["Index", ["Proximal", "Intermediate", "Distal"]], ["Middle", ["Proximal", "Intermediate", "Distal"]], ["Ring", ["Proximal", "Intermediate", "Distal"]], ["Little", ["Proximal", "Intermediate", "Distal"]]];
+    F.forEach(([f, segs], k) => ["a", "b", "c"].forEach((seg, j) => put(`${s}${f}${segs[j]}`, find(new RegExp(`^arm ${side} finger ${k + 1}${seg}$`)))));
+  }
+  // hips: where the spine and both legs meet
+  const isAnc = (a: number, b: number) => {
+    for (let p = parent.get(b); p !== undefined; p = parent.get(p)) if (p === a) return true;
+    return false;
+  };
+  if (out.spine !== undefined && out.leftUpperLeg !== undefined && out.rightUpperLeg !== undefined) {
+    for (let p = parent.get(out.spine); p !== undefined; p = parent.get(p)) {
+      if (isAnc(p, out.leftUpperLeg) && isAnc(p, out.rightUpperLeg)) {
+        out.hips = p;
+        break;
+      }
+    }
+  }
+  return out;
+}
+
 const REQUIRED = ["hips", "spine", "head", "leftUpperLeg", "leftLowerLeg", "leftFoot", "rightUpperLeg", "rightLowerLeg", "rightFoot", "leftUpperArm", "leftLowerArm", "leftHand", "rightUpperArm", "rightLowerArm", "rightHand"];
 
 /** VRM 0.x names for the same bones ("leftThumbMetacarpal" was "leftThumbProximal" there, and so on). */
@@ -490,6 +540,10 @@ export function fixVrm(buf: Buffer): { fixed: Buffer; bones: number; scale?: num
   if (empty1 || empty0) {
     const joints = new Set(json.skins?.flatMap((s) => s.joints) ?? []);
     let map = guessHumanoid(json.nodes, joints);
+    if (REQUIRED.some((b) => map[b] === undefined)) {
+      const byParts = guessHumanoidByParts(json.nodes, joints);
+      if (REQUIRED.every((b) => byParts[b] !== undefined)) map = byParts;
+    }
     if (REQUIRED.some((b) => map[b] === undefined)) {
       const byShape = guessHumanoidByShape(json, bin);
       if (REQUIRED.every((b) => byShape[b] !== undefined)) map = byShape;

@@ -82,6 +82,12 @@ export function hideHelperMeshes(vrm: VRM): string[] {
     const verts = m.geometry.getAttribute("position")?.count ?? 0;
     const mat = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.MeshStandardMaterial;
     const matName = mat.name;
+    // A baked ambient-occlusion shadow layer: the game multiplies it over the body; drawn plainly it is a grey patch.
+    if (/AO[_ ]?Shadow/i.test(matName)) {
+      m.visible = false;
+      hidden.push(`${matName} (shadow layer)`);
+      continue;
+    }
     // Fully transparent in the file (alpha 0): invisible in the original too (effects the game drives itself).
     // Converting it to a toon material would lose that and show it as a solid white or black patch.
     if (mat.transparent && mat.opacity <= 0.01) {
@@ -144,6 +150,28 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
       }
     }
   }
+  // Chains named by part ("hair FA01", "Clothes Skirt CSA.001.L", "Clothes Veil ...", "Clothes Tail FB02.L"):
+  // each one swings from its root, with the body as obstacles.
+  const NAMED = /^(hair|clothes[ _](tail|skirt|flap|veil|acc|cloth|wings))/i; // (three.js turns spaces into "_")
+  const base = (n: string) => n.replace(/(_\d+)+$/, "");
+  const isLink = (o: THREE.Object3D) => NAMED.test(base(o.name)) && !/_end/.test(o.name);
+  const roots: THREE.Object3D[] = [];
+  vrm.scene.traverse((o) => {
+    if (isLink(o) && !(o.parent && isLink(o.parent))) roots.push(o);
+  });
+  if (roots.length) {
+    const group = { colliders: bodyColliders(vrm, true), name: "body" };
+    const size = (vrm.humanoid.getRawBoneNode("head")?.getWorldPosition(new THREE.Vector3()).y ?? 1.35) / 0.85;
+    const walk = (o: THREE.Object3D) => {
+      const kids = o.children.filter(isLink);
+      const next = kids[0] ?? o.children.find((c) => /_end/.test(c.name)) ?? null;
+      const cloth = /clothes/i.test(o.name);
+      mgr.addJoint(new VRMSpringBoneJoint(o, next, { stiffness: cloth ? 0.9 : 0.6, dragForce: 0.4, gravityPower: cloth ? 0.15 : 0.3, gravityDir: new THREE.Vector3(0, -1, 0), hitRadius: (cloth ? 0.015 : 0.02) * size }, [group]));
+      count++;
+      for (const k of kids) walk(k);
+    };
+    for (const r of roots) walk(r);
+  }
   vrm.scene.traverse((o) => {
     if (!SPRING_CHAIN.test(o.name)) return;
     const next = o.children.find((c) => CHAIN_LINK.test(c.name)) ?? o.children.find((c) => /_end(_\d+)?$/.test(c.name)) ?? null;
@@ -161,7 +189,7 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
  * body instead of through it. Sizes from her height. Each collider is attached to its bone with the bone's world
  * scale undone, so its radius is in metres whatever the skeleton's scale.
  */
-function bodyColliders(vrm: VRM): VRMSpringBoneCollider[] {
+function bodyColliders(vrm: VRM, legs = false): VRMSpringBoneCollider[] {
   const H = vrm.humanoid;
   const size = (H.getRawBoneNode("head")?.getWorldPosition(new THREE.Vector3()).y ?? 1.35) / 0.85;
   const out: VRMSpringBoneCollider[] = [];
@@ -264,6 +292,11 @@ function bodyColliders(vrm: VRM): VRMSpringBoneCollider[] {
     rs.sort((x, y) => x - y);
     return rs[Math.floor(rs.length * 0.9)];
   };
+  if (legs) for (const s of ["left", "right"]) {
+    // thighs, as thick as the mesh around them, so skirts slide over the legs
+    attach(`${s}UpperLeg`, new VRMSpringBoneColliderShapeCapsule({ radius: thickness(`${s}UpperLeg`, `${s}LowerLeg`), tail: toward(`${s}UpperLeg`, `${s}LowerLeg`) }));
+    attach(`${s}LowerLeg`, new VRMSpringBoneColliderShapeCapsule({ radius: thickness(`${s}LowerLeg`, `${s}Foot`), tail: toward(`${s}LowerLeg`, `${s}Foot`) }));
+  }
   for (const s of ["left", "right"]) {
     attach(`${s}UpperArm`, new VRMSpringBoneColliderShapeCapsule({ radius: thickness(`${s}UpperArm`, `${s}LowerArm`), tail: toward(`${s}UpperArm`, `${s}LowerArm`) }));
     attach(`${s}Shoulder`, new VRMSpringBoneColliderShapeCapsule({ radius: thickness(`${s}Shoulder`, `${s}UpperArm`), tail: toward(`${s}Shoulder`, `${s}UpperArm`) }));
