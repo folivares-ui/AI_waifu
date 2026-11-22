@@ -313,6 +313,53 @@ function bodyColliders(vrm: VRM, legs = false): VRMSpringBoneCollider[] {
   return out;
 }
 
+/**
+ * Makes sure she stands up and faces the camera (+z): some converted models keep a rotation from their original
+ * tool (lying down, leaning, or turned away). The body's own axis decides: hips -> head must point up, and the
+ * eyes (or toes) must be in front. Upright models are left untouched. Returns true if it had to turn her.
+ */
+export function standUpright(vrm: VRM): boolean {
+  const H = vrm.humanoid;
+  const hips = H.getRawBoneNode("hips");
+  const head = H.getRawBoneNode("head");
+  if (!hips || !head) return false;
+  vrm.scene.updateMatrixWorld(true);
+  const W = (o: THREE.Object3D) => o.getWorldPosition(new THREE.Vector3());
+  let turned = false;
+  const up = W(head).sub(W(hips)).normalize();
+  if (up.y < 0.95) {
+    vrm.scene.quaternion.premultiply(new THREE.Quaternion().setFromUnitVectors(up, new THREE.Vector3(0, 1, 0)));
+    vrm.scene.updateMatrixWorld(true);
+    turned = true;
+  }
+  // facing: from the head to the eyes (or from the ankles to the toes), on the ground plane
+  const eyes = (["leftEye", "rightEye"] as const).map((n) => H.getRawBoneNode(n)).filter((b): b is THREE.Object3D => !!b);
+  const toes = (["leftToes", "rightToes"] as const).map((n) => H.getRawBoneNode(n)).filter((b): b is THREE.Object3D => !!b);
+  const feet = (["leftFoot", "rightFoot"] as const).map((n) => H.getRawBoneNode(n)).filter((b): b is THREE.Object3D => !!b);
+  const mid = (os: THREE.Object3D[]) => os.reduce((s, o) => s.add(W(o)), new THREE.Vector3()).multiplyScalar(1 / os.length);
+  // (the toes are the safest guide: eye bones sometimes sit at the back of the eyeball, behind the head bone)
+  void eyes;
+  const f = toes.length && feet.length ? mid(toes).sub(mid(feet)) : undefined;
+  if (f) {
+    f.y = 0;
+    // only when she is clearly turned (sideways or away): feet are often splayed a little
+    if (f.lengthSq() > 1e-8 && f.normalize().z < 0.3) {
+      const yaw = Math.atan2(f.x, f.z); // how far she is turned from +z
+      vrm.scene.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -yaw));
+      vrm.scene.updateMatrixWorld(true);
+      turned = true;
+    }
+  }
+  // feet back on the ground
+  if (turned) {
+    const box = new THREE.Box3().setFromObject(vrm.scene);
+    vrm.scene.position.y -= box.min.y;
+    vrm.scene.updateMatrixWorld(true);
+    console.info("[avatar] the model was not standing up / facing the camera: turned upright");
+  }
+  return turned;
+}
+
 /** Close-up for icons: the face, plus hat/ears when the model has them. */
 export function faceFraming(vrm: VRM, headY: number, fovDeg: number): { y: number; dist: number } {
   const top = new THREE.Box3().setFromObject(vrm.scene).max.y;
