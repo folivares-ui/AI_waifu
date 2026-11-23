@@ -154,7 +154,10 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
   // each one swings from its root, with the body as obstacles.
   const NAMED = /^(hair|clothes[ _](tail|skirt|flap|veil|acc|cloth))/i; // (not wings: they hold their shape) // (three.js turns spaces into "_")
   const base = (n: string) => n.replace(/(_\d+)+$/, "");
-  const isLink = (o: THREE.Object3D) => NAMED.test(base(o.name)) && !/_end/.test(o.name);
+  // AdvancedSkeleton dynamic joints: "HairBL_03_JNT", "SkirtF_01_JNT", "ChestRibbonL_b_00_JNT", "EarlaceL_01_JNT"
+  // (armour, weapons and ornaments that hold their shape are left alone)
+  const JNT = /^(Hair|Skirt|\w*Ribbon|Earlace)\w*_\d\d_JNT(_\d+)?$/;
+  const isLink = (o: THREE.Object3D) => (NAMED.test(base(o.name)) || (JNT.test(o.name) && !/Belt|Butter/i.test(o.name))) && !/_end/.test(o.name);
   const roots: THREE.Object3D[] = [];
   vrm.scene.traverse((o) => {
     if (isLink(o) && !(o.parent && isLink(o.parent))) roots.push(o);
@@ -165,7 +168,7 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
     const walk = (o: THREE.Object3D) => {
       const kids = o.children.filter(isLink);
       const next = kids[0] ?? o.children.find((c) => /_end/.test(c.name)) ?? null;
-      const cloth = /clothes/i.test(o.name);
+      const cloth = /clothes|skirt|ribbon/i.test(o.name);
       // Keep the shape the artist gave it: a link that does not hang down (a lock swept up or out, a flared
       // skirt) would collapse under gravity, so the further from "down" it points, the stiffer and lighter it is.
       let hang = 1;

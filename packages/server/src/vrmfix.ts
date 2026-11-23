@@ -213,6 +213,42 @@ export function guessHumanoidByParts(nodes: GltfNode[], joints: Set<number>): Re
   return out;
 }
 
+/**
+ * AdvancedSkeleton-style names: "Root_M", "Spine1_M", "Chest_M", "Head_M", "Hip_L", "Knee_L", "Ankle_L",
+ * "Scapula_L", "Shoulder_L", "Elbow_L", "Wrist_L", "IndexFinger1_L"... (the _M/_L/_R suffix is the side).
+ * "...Part1" twist helpers are ignored. Returns VRM 1.0 bone names -> node index.
+ */
+export function guessHumanoidAdvanced(nodes: GltfNode[], joints: Set<number>): Record<string, number> {
+  const clean = (n: string) => n.replace(/_\d+$/, "");
+  const all = nodes.map((n, i) => ({ i, n: clean(n.name ?? "") })).filter((x) => joints.size === 0 || joints.has(x.i));
+  const find = (name: string) => all.find((x) => x.n === name)?.i;
+  const out: Record<string, number> = {};
+  const put = (bone: string, name: string) => {
+    const i = find(name);
+    if (i !== undefined) out[bone] = i;
+  };
+  put("hips", "Root_M");
+  put("spine", "Spine1_M");
+  put("chest", "Spine2_M");
+  put("upperChest", "Chest_M");
+  put("neck", "Neck_M");
+  put("head", "Head_M");
+  for (const [s, k] of [["left", "L"], ["right", "R"]] as const) {
+    put(`${s}UpperLeg`, `Hip_${k}`);
+    put(`${s}LowerLeg`, `Knee_${k}`);
+    put(`${s}Foot`, `Ankle_${k}`);
+    put(`${s}Toes`, `Toes_${k}`);
+    put(`${s}Shoulder`, `Scapula_${k}`);
+    put(`${s}UpperArm`, `Shoulder_${k}`);
+    put(`${s}LowerArm`, `Elbow_${k}`);
+    put(`${s}Hand`, `Wrist_${k}`);
+    put(`${s}Eye`, `eye_${k}`);
+    const F: [string, string, string[]][] = [["Thumb", "Thumb", ["Metacarpal", "Proximal", "Distal"]], ["Index", "Index", ["Proximal", "Intermediate", "Distal"]], ["Middle", "Middle", ["Proximal", "Intermediate", "Distal"]], ["Ring", "Ring", ["Proximal", "Intermediate", "Distal"]], ["Little", "Pinky", ["Proximal", "Intermediate", "Distal"]]];
+    for (const [f, src, segs] of F) segs.forEach((g, j) => put(`${s}${f}${g}`, `${src}Finger${j + 1}_${k}`));
+  }
+  return out;
+}
+
 const REQUIRED = ["hips", "spine", "head", "leftUpperLeg", "leftLowerLeg", "leftFoot", "rightUpperLeg", "rightLowerLeg", "rightFoot", "leftUpperArm", "leftLowerArm", "leftHand", "rightUpperArm", "rightLowerArm", "rightHand"];
 
 /** VRM 0.x names for the same bones ("leftThumbMetacarpal" was "leftThumbProximal" there, and so on). */
@@ -543,6 +579,10 @@ export function fixVrm(buf: Buffer): { fixed: Buffer; bones: number; scale?: num
     if (REQUIRED.some((b) => map[b] === undefined)) {
       const byParts = guessHumanoidByParts(json.nodes, joints);
       if (REQUIRED.every((b) => byParts[b] !== undefined)) map = byParts;
+    }
+    if (REQUIRED.some((b) => map[b] === undefined)) {
+      const adv = guessHumanoidAdvanced(json.nodes, joints);
+      if (REQUIRED.every((b) => adv[b] !== undefined)) map = adv;
     }
     if (REQUIRED.some((b) => map[b] === undefined)) {
       const byShape = guessHumanoidByShape(json, bin);

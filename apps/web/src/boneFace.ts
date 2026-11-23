@@ -152,6 +152,11 @@ export class BoneFaceRig {
       const head = vrm.humanoid.getRawBoneNode("head");
       if (head) for (const m of geometryMovesParts(head, candidates)) add(m.channel, m.node, m);
     }
+    // Family 7: AdvancedSkeleton faces ("eyeup_M_L", "eyebrow_Inn_L", "lipConner_L"...)
+    if (this.channels.size === 0) {
+      const head = vrm.humanoid.getRawBoneNode("head");
+      if (head) for (const m of geometryMovesParts(head, candidates, ADVANCED_NAMES)) add(m.channel, m.node, m);
+    }
     // Family 4: "Facial_Elbow_A_01_L" (eyebrows), "Facial_Mouth_A_01_L/M/R", "Facial_Cheek_A_01_L"... and no
     // eyelid or jaw bones: those two are built from the face mesh itself (synthFace.ts).
     if (this.channels.size === 0) {
@@ -445,7 +450,49 @@ const famP = (n: string) => n.replace(/_\d+$/, "").replace(/_/g, " ").trim().toL
  * corners), eyebrows 1..3, mouth corners, upper/lower lips, jaw, cheeks. As in family 2, each movement is
  * measured on the model: a blink brings every upper-lid bone down to the lower lid below it.
  */
-export function geometryMovesParts(head: THREE.Object3D, nodes: THREE.Object3D[]): GeoMove[] {
+/** How one naming style calls each part of the face (names cleaned by famP: lowercase, spaces). */
+export interface FaceNames {
+  sides: [string, string];
+  upper: (s: string) => RegExp;
+  lower: (s: string) => RegExp;
+  corners: (s: string) => RegExp;
+  brows: (s: string) => RegExp;
+  mouthCorner: (s: string) => RegExp;
+  cheek: (s: string) => RegExp;
+  /** Lower-lip bones (pushed for the pout, and dropped to open the mouth when there is no jaw bone). */
+  lowerLips: RegExp;
+  jaw?: RegExp;
+  lowerLipMiddle: RegExp;
+}
+
+/** "head eyelid upper left 1", "head eyebrow left 2", "head mouth corner left", "head jaw" (e.g. Ronova). */
+export const PART_NAMES: FaceNames = {
+  sides: ["left", "right"],
+  upper: (s) => new RegExp(`^head eyelid upper ${s} \\d$`),
+  lower: (s) => new RegExp(`^head eyelid lower ${s} \\d$`),
+  corners: (s) => new RegExp(`^head eyelid corner (inner|outer) ${s}$`),
+  brows: (s) => new RegExp(`^head eyebrow ${s} \\d$`),
+  mouthCorner: (s) => new RegExp(`^head mouth corner ${s}$`),
+  cheek: (s) => new RegExp(`^head cheek ${s} 1$`),
+  lowerLips: /^head lips lower (middle|left 1|right 1)$/,
+  jaw: /^head jaw$/,
+  lowerLipMiddle: /^head lips lower middle$/,
+};
+
+/** AdvancedSkeleton face: "eyeup_M_L", "eyedn_inn_L", "eyeconner_out_L", "eyebrow_Mid_L", "lipConner_L"... */
+export const ADVANCED_NAMES: FaceNames = {
+  sides: ["l", "r"],
+  upper: (s) => new RegExp(`^eyeup (inn|m|out) ${s}$`),
+  lower: (s) => new RegExp(`^eyedn (inn|m|out) ${s}$`),
+  corners: (s) => new RegExp(`^eyeconner (inn|out) ${s}$`),
+  brows: (s) => new RegExp(`^eyebrow (inn|mid|out) ${s}$`),
+  mouthCorner: (s) => new RegExp(`^lipconner ${s}$`),
+  cheek: (s) => new RegExp(`^chee?h?k ${s}$|^chhek ${s}$`),
+  lowerLips: /^(liplower (m|00 l|00 r|01 l|01 r)|mouthlower m|downteeth)$/,
+  lowerLipMiddle: /^liplower m$/,
+};
+
+export function geometryMovesParts(head: THREE.Object3D, nodes: THREE.Object3D[], names: FaceNames = PART_NAMES): GeoMove[] {
   head.updateMatrixWorld(true);
   const origin = head.getWorldPosition(new THREE.Vector3());
   const pos = (o: THREE.Object3D) => o.getWorldPosition(new THREE.Vector3()).sub(origin).multiplyScalar(1000); // mm
@@ -455,11 +502,11 @@ export function geometryMovesParts(head: THREE.Object3D, nodes: THREE.Object3D[]
   const mm = (channel: Channel, node: THREE.Object3D | undefined, x: number, y: number, z: number) => {
     if (node) out.push({ channel, node, mm: [x, y, z] });
   };
-  for (const side of ["left", "right"]) {
-    const upper = find(new RegExp(`^head eyelid upper ${side} \\d$`));
-    const lower = find(new RegExp(`^head eyelid lower ${side} \\d$`));
+  for (const side of names.sides) {
+    const upper = find(names.upper(side));
+    const lower = find(names.lower(side));
     if (upper.length < 2 || lower.length < 2) continue;
-    const corners = find(new RegExp(`^head eyelid corner (inner|outer) ${side}$`));
+    const corners = find(names.corners(side));
     const line = [...lower, ...corners].map((o) => pos(o)).sort((a, b) => a.x - b.x);
     const lowerY = (x: number) => {
       if (x <= line[0].x) return line[0].y;
@@ -515,7 +562,7 @@ export function geometryMovesParts(head: THREE.Object3D, nodes: THREE.Object3D[]
       }
     }
     // eyebrows: 1..3, inner = closest to the nose
-    const brows = find(new RegExp(`^head eyebrow ${side} \\d$`)).sort((a, b) => Math.abs(pos(a).x) - Math.abs(pos(b).x));
+    const brows = find(names.brows(side)).sort((a, b) => Math.abs(pos(a).x) - Math.abs(pos(b).x));
     const unit = Math.max(3, Math.min(7, meanGap * 0.45));
     const inward = -Math.sign(pos(brows[0] ?? upper[0]).x) || 1;
     brows.forEach((o, i) => {
@@ -527,7 +574,7 @@ export function geometryMovesParts(head: THREE.Object3D, nodes: THREE.Object3D[]
       mm("browFurrow", o, inward * unit * 0.45 * (1 - t), -unit * 0.25 * (1 - t), 0);
     });
     // mouth corner and cheek
-    const corner = one(new RegExp(`^head mouth corner ${side}$`));
+    const corner = one(names.mouthCorner(side));
     if (corner) {
       const o = Math.sign(pos(corner).x) || 1;
       mm("mouthSmile", corner, o * 1.5, 3, 0);
@@ -536,15 +583,23 @@ export function geometryMovesParts(head: THREE.Object3D, nodes: THREE.Object3D[]
       mm("mouthWide", corner, o * 2.5, 0.4, 0);
       mm("mouthPout", corner, 0, -2, 0);
     }
-    const cheek = one(new RegExp(`^head cheek ${side} 1$`));
+    const cheek = one(names.cheek(side));
     mm("mouthSmile", cheek, 0, 1.5, 0);
     mm("eyeSmile", cheek, 0, 1.5, 0);
   }
-  for (const o of find(/^head lips lower (middle|left 1|right 1)$/)) mm("mouthPout", o, 0, 1.2, 1.6);
+  const lowerLips = find(names.lowerLips);
+  for (const o of lowerLips) mm("mouthPout", o, 0, 1.2, 1.6);
   // jaw: rotating it opens the mouth (the lower lip hangs from it): ~11 mm at the lower lip
-  const jaw = one(/^head jaw$/);
+  const jaw = names.jaw ? one(names.jaw) : undefined;
+  if (!jaw && lowerLips.length) {
+    // no jaw bone: the lower lip bones drop, most in the middle (an open, rounded mouth)
+    const mid = one(names.lowerLipMiddle) ?? lowerLips[0];
+    const cx = pos(mid).x;
+    const half = Math.max(5, ...lowerLips.map((o) => Math.abs(pos(o).x - cx)));
+    for (const o of lowerLips) mm("mouthOpen", o, 0, -9 * (1 - 0.55 * Math.min(1, Math.abs(pos(o).x - cx) / half)), -1);
+  }
   if (jaw) {
-    const lip = one(/^head lips lower middle$/);
+    const lip = one(names.lowerLipMiddle);
     const reach = lip ? Math.max(30, Math.hypot(pos(lip).y - pos(jaw).y, pos(lip).z - pos(jaw).z)) : 90;
     out.push({ channel: "mouthOpen", node: jaw, rot: [11 / reach, 0, 0] });
   }

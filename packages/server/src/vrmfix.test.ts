@@ -221,4 +221,18 @@ describe("bones named by body part ('leg left thigh', 'arm right elbow', 'head n
       leftShoulder: "arm left shoulder 1_0444", leftUpperArm: "arm left shoulder 2_0447", leftLowerArm: "arm left elbow_0449", leftHand: "arm left wrist_0451", leftThumbMetacarpal: "arm left finger 1a_0457",
     });
   });
+  it("recognises bones named like Root_M / Hip_L / Elbow_R / IndexFinger2_L", async () => {
+    const { guessHumanoidAdvanced } = await import("./vrmfix.js");
+    const names = ["Root_M_01", "Spine1_M_02", "Spine2_M_03", "Chest_M_04", "Neck_M_05", "Head_M_06", "Hip_L_07", "Knee_L_08", "Ankle_L_09", "Toes_L_10", "Scapula_R_11", "Shoulder_R_12", "Elbow_R_13", "Wrist_R_14", "IndexFinger2_R_15", "PinkyFinger1_R_16", "eye_L_17", "Weapon_18"];
+    const nodes = names.map((name) => ({ name }));
+    const map = guessHumanoidAdvanced(nodes, new Set());
+    const named = Object.fromEntries(Object.entries(map).map(([b, i]) => [b, names[i]]));
+    expect(named).toMatchObject({
+      hips: "Root_M_01", spine: "Spine1_M_02", chest: "Spine2_M_03", upperChest: "Chest_M_04", neck: "Neck_M_05", head: "Head_M_06",
+      leftUpperLeg: "Hip_L_07", leftLowerLeg: "Knee_L_08", leftFoot: "Ankle_L_09", leftToes: "Toes_L_10",
+      rightShoulder: "Scapula_R_11", rightUpperArm: "Shoulder_R_12", rightLowerArm: "Elbow_R_13", rightHand: "Wrist_R_14",
+      rightIndexIntermediate: "IndexFinger2_R_15", rightLittleProximal: "PinkyFinger1_R_16", leftEye: "eye_L_17",
+    });
+    expect(Object.values(named)).not.toContain("Weapon_18");
+  });
 });

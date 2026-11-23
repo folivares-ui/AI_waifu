@@ -22,6 +22,7 @@ describe("characters", () => {
     expect(list.map((x) => [x.id, x.name, x.builtIn])).toEqual([
       ["agnes-tachyon", "Agnes Tachyon", true],
       ["ai-hoshino", "Ai Hoshino", true],
+      ["castorice", "Castorice", true],
       ["caulifla", "Caulifla", true],
       ["default", "Rice Shower", true],
       ["midnight", "Midnight", true],
