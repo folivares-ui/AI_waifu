@@ -163,11 +163,26 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
     if (isLink(o) && !(o.parent && isLink(o.parent))) roots.push(o);
   });
   if (roots.length) {
-    const group = { colliders: bodyColliders(vrm, true), name: "body" };
+    const all = bodyColliders(vrm, true);
+    vrm.scene.updateMatrixWorld(true);
+    for (const c of all) c.updateWorldMatrix(true, false);
+    const groups = new Map<string, { colliders: VRMSpringBoneCollider[]; name: string }>();
+    // A link whose tip already lies inside one of the obstacles at rest (bangs rooted under the head's sphere)
+    // would be pushed out of it for ever and stay bent: that obstacle is left out for that link.
+    const groupFor = (tip: THREE.Vector3, r: number) => {
+      const t = new THREE.Vector3();
+      const keep = all.filter((c) => c.shape.calculateCollision(c.colliderMatrix, tip, r, t) >= 0);
+      const key = keep.map((c) => all.indexOf(c)).join(",");
+      let g = groups.get(key);
+      if (!g) groups.set(key, (g = { colliders: keep, name: "body" }));
+      return g;
+    };
     const size = (vrm.humanoid.getRawBoneNode("head")?.getWorldPosition(new THREE.Vector3()).y ?? 1.35) / 0.85;
     const walk = (o: THREE.Object3D) => {
       const kids = o.children.filter(isLink);
       const next = kids[0] ?? o.children.find((c) => /_end/.test(c.name)) ?? null;
+      // (a last joint with nothing after it has no direction to keep: it would swing to an arbitrary one)
+      if (!next) return;
       const cloth = /clothes|skirt|ribbon/i.test(o.name);
       // Keep the shape the artist gave it: a link that does not hang down (a lock swept up or out, a flared
       // skirt) would collapse under gravity, so the further from "down" it points, the stiffer and lighter it is.
@@ -178,7 +193,7 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
       }
       const stiffness = (cloth ? 2.2 : 1.6) + (1 - hang) * 3;
       const gravityPower = (cloth ? 0.04 : 0.08) * hang * hang;
-      mgr.addJoint(new VRMSpringBoneJoint(o, next, { stiffness, dragForce: 0.45, gravityPower, gravityDir: new THREE.Vector3(0, -1, 0), hitRadius: (cloth ? 0.015 : 0.02) * size }, [group]));
+      mgr.addJoint(new VRMSpringBoneJoint(o, next, { stiffness, dragForce: 0.45, gravityPower, gravityDir: new THREE.Vector3(0, -1, 0), hitRadius: (cloth ? 0.015 : 0.02) * size }, [groupFor(next.getWorldPosition(new THREE.Vector3()), (cloth ? 0.015 : 0.02) * size)]));
       count++;
       for (const k of kids) walk(k);
     };
