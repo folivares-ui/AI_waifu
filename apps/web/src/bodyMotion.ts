@@ -230,6 +230,16 @@ export function bodyPose(s: BodyState): BodyPose {
       pose.rightHand = add(pose.rightHand, mirror([0, 0, 0.25 * beat * wR]));
     }
   }
+  // Feet stay planted: whatever tilts or turns the hips (weight shift, a popped hip when fidgeting...), the thighs
+  // turn back by as much, so the legs stand where they stood instead of swinging with the pelvis like a pendulum
+  // (and dragging a long skirt or coat with them).
+  const hipTilt = pose.hips?.[2] ?? 0;
+  const hipTurn = pose.hips?.[1] ?? 0;
+  for (const leg of ["leftUpperLeg", "rightUpperLeg"] as const) {
+    const e = pose[leg] ?? [0, 0, 0];
+    // (the weight shift's own counter-tilt is already in: only the rest of the tilt is added)
+    pose[leg] = [e[0], e[1] - hipTurn, e[2] - (hipTilt - 0.035 * shift)];
+  }
   // An elbow only bends one way, and not all the way: whatever was added up above, the forearm never bends
   // backwards (left: y < 0 bends it forward; right: y > 0) nor folds onto the upper arm.
   const elbow = (e: Euler3 | undefined, sign: number): Euler3 | undefined =>
