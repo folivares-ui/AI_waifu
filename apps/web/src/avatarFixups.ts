@@ -88,6 +88,13 @@ export function hideHelperMeshes(vrm: VRM): string[] {
       hidden.push(`${matName} (shadow layer)`);
       continue;
     }
+    // An outline drawn as a black copy of a mesh ("inverted hull"): the game draws only its back faces, pushed
+    // out a little; drawn plainly it covers the whole model in black. (The toon materials draw their own outline.)
+    if (/outline/i.test(matName) && !map) {
+      m.visible = false;
+      hidden.push(`${matName} (outline copy)`);
+      continue;
+    }
     // Fully transparent in the file (alpha 0): invisible in the original too (effects the game drives itself).
     // Converting it to a toon material would lose that and show it as a solid white or black patch.
     if (mat.transparent && mat.opacity <= 0.01) {
