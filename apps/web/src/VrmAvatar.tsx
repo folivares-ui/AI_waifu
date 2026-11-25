@@ -414,6 +414,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
       const chest = vrm.humanoid.getNormalizedBoneNode("chest");
       if (chest) {
         chest.rotation.x = lerp(chest.rotation.x, Math.sin(t * 1.5 + 0.4) * 0.01 + (body.chest?.[0] ?? 0) * armK, follow);
+        chest.rotation.y = lerp(chest.rotation.y, body.chest?.[1] ?? 0, follow);
         chest.rotation.z = lerp(chest.rotation.z, (body.chest?.[2] ?? 0) * armK, follow);
       }
 

@@ -13,14 +13,16 @@ export function AvatarStage({ character = "", ...props }: AvatarProps & { charac
   const [model, setModel] = useState<ArrayBuffer | null>(null);
   const [fx, setFx] = useState<(TouchFx & { id: number })[]>([]);
 
+  // The model of the active character (the query only keeps browsers from reusing another character's model).
+  // Always from the soul server (in development the page itself comes from another server with its own files).
+  const fetchSaved = () =>
+    fetch(`${serverBase().http}/avatars/default.vrm?c=${encodeURIComponent(character)}&t=${Date.now()}`, { headers: serverBase().token ? { authorization: `Bearer ${serverBase().token}` } : {} })
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .then((b) => (b && isGlb(b) ? b : null)) // dev servers may answer 200 with index.html
+      .catch(() => null);
   useEffect(() => {
     let cancelled = false;
-    // The model of the active character (the query only keeps browsers from reusing another character's model).
-    // Always from the soul server (in development the page itself comes from another server with its own files).
-    fetch(`${serverBase().http}/avatars/default.vrm?c=${encodeURIComponent(character)}`, { headers: serverBase().token ? { authorization: `Bearer ${serverBase().token}` } : {} })
-      .then((r) => (r.ok ? r.arrayBuffer() : null))
-      .then((b) => !cancelled && b && isGlb(b) && setModel(b)) // dev servers may answer 200 with index.html
-      .catch(() => {});
+    void fetchSaved().then((b) => !cancelled && b && setModel(b));
     return () => {
       cancelled = true;
     };
@@ -40,7 +42,11 @@ export function AvatarStage({ character = "", ...props }: AvatarProps & { charac
     setModel(b);
     // Keep it: next time the app opens with this model, no need to load it again.
     const r = await savePersonal("avatar", b);
-    if (!r.ok) alert(`El modelo se muestra, pero no se pudo guardar: ${r.message}`);
+    if (!r.ok) return alert(`El modelo se muestra, pero no se pudo guardar: ${r.message}`);
+    // The server may have repaired it (bones recognised, resized, a skeleton that did not fit replaced): show
+    // the saved model, as it will be next time, not the file as picked.
+    const saved = await fetchSaved();
+    if (saved) setModel(saved);
   };
 
   return (

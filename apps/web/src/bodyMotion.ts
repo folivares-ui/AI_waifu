@@ -126,7 +126,9 @@ export function bodyPose(s: BodyState): BodyPose {
   pose.leftShoulder = add(pose.leftShoulder, [0, 0, 0.02 * energy * breath]);
   pose.rightShoulder = add(pose.rightShoulder, [0, 0, -0.02 * energy * breath]);
   // The torso is alive too: a slow twist and side sway (more with energy).
-  pose.spine = add(pose.spine, [0, 0.025 * (energy - 0.6) * Math.sin(t * 0.6), 0]);
+  // (calm characters turn too, just less: a torso that only ever tilts looks stiff)
+  pose.spine = add(pose.spine, [0, 0.045 * Math.max(0.6, energy) * Math.sin(t * 0.45) * (0.75 + 0.25 * Math.sin(t * 0.17)), 0]);
+  pose.chest = add(pose.chest, [0, 0.015 * Math.max(0.6, energy) * Math.sin(t * 0.45 - 0.6), 0]);
   pose.chest = add(pose.chest, [0, 0, 0.012 * (energy - 0.6) * Math.sin(t * 0.75 + 0.5)]);
 
   // Weight shift every few seconds: hips tilt, the free leg's knee bends a little.
