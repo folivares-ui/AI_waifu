@@ -53,8 +53,9 @@ describe("body language", () => {
     const twist = (p: ReturnType<typeof at>) => p.spine![1];
     expect(range(lively, arm)).toBeGreaterThan(1.5 * range(undefined, arm));
     expect(range(lively, knee)).toBeGreaterThan(range(undefined, knee));
-    expect(range(lively, twist)).toBeGreaterThan(0.05);
-    expect(range(undefined, twist)).toBeLessThan(0.05);
+    // every torso turns a little (one that only tilts looks stiff); a lively one turns more
+    expect(range(undefined, twist)).toBeGreaterThan(0.04);
+    expect(range(lively, twist)).toBeGreaterThan(1.3 * range(undefined, twist));
     // fidgets: at some point a hand goes to the hip or the shoulders shrug, which the calm style never does
     const shrug = (p: ReturnType<typeof at>) => p.leftShoulder![2];
     expect(range(lively, shrug)).toBeGreaterThan(2 * range(undefined, shrug));
