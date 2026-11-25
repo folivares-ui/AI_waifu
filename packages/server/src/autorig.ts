@@ -885,7 +885,10 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
       const q = axis(p[1]);
       const r = Math.hypot(p[0] - q[0], p[2] - q[2]);
       const reach = p[1] < l.ankle[1] + 0.01 * H ? 0.16 * H : 0.075 * H; // feet stick out forward
-      const onLeg = part === 3 ? 0 : p[1] < crotch ? smooth((reach - r) / (0.02 * H)) : smooth((0.06 * H - r) / (0.02 * H)) * smooth((hipY - p[1]) / (hipY - crotch || 1));
+      // (above the crotch, cloth across the middle, the front of a dress or skirt, stays with the hips: each half
+      // following its own thigh would fold it down the middle)
+      const middle = smooth((Math.abs(p[0] - cx) - 0.02 * H) / (0.04 * H));
+      const onLeg = part === 3 ? 0 : p[1] < crotch ? smooth((reach - r) / (0.02 * H)) : smooth((0.06 * H - r) / (0.02 * H)) * smooth((hipY - p[1]) / (hipY - crotch || 1)) * middle;
       if (onLeg > 0) {
         const kn = smooth((l.knee[1] + 0.02 * H - p[1]) / (0.04 * H)); // 1 below the knee
         const an = smooth((l.ankle[1] + 0.012 * H - p[1]) / (0.024 * H)); // 1 below the ankle
