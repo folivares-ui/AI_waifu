@@ -11,30 +11,29 @@ export class MockProvider implements LLMProvider {
       yield /spoken Japanese/.test(req.system) ? "（デモ）がんばります。" : asText(req.messages.at(-1)?.content ?? "");
       return;
     }
-    // Demo reactions (no API key): petting and gestures, in Rice Shower's style.
+    // Demo reactions (no API key): petting and gestures. Neutral words, so they fit whichever character is
+    // active (the demo brain does not read the character).
     const touch = asText(req.messages.at(-1)?.content ?? "").match(/^\[(Caricia con el cursor|Gesto con la mano ante la camara): ([^\]]+)\]/);
     if (touch) {
       const canned: Record<string, string> = {
-        cabeza: "[emotion:happy] E-ehehe... A Rice le gusta mucho, Onii-sama...",
-        orejas: "[emotion:surprised] ¡Hyaa! L-las orejas de Rice tienen cosquillas...",
-        mejillas: "[emotion:shy] U-um... Rice se pone toda roja, Onii-sama...",
-        cara: "[emotion:surprised] ¿Eh? ¿Rice tiene algo en la cara?",
-        pelo: "[emotion:happy] Rice se peino bien hoy... ¿le gusta, Onii-sama?",
-        manos: "[emotion:shy] La mano de Onii-sama es muy calida...",
-        brazos: "[emotion:surprised] ¿Sí, Onii-sama? ¿Rice puede ayudar en algo?",
-        hombros: "[emotion:surprised] ¿Sí, Onii-sama? ¿Rice puede ayudar en algo?",
-        "saludo con la mano": "[emotion:happy] ¡Hola, Onii-sama! Rice tambien le saluda.",
-        "pulgar arriba": "[emotion:happy] ¡Arigatou! Rice se esforzara aun mas.",
-        "pulgar abajo": "[emotion:sad] Gomen ne... Rice lo hara mejor la proxima vez.",
-        "signo de victoria (V)": "[emotion:happy] ¡Victoria! Ganbaru, Onii-sama.",
-        "te quiero (mano)": "[emotion:shy] O-Onii-sama... Rice tambien le quiere mucho...",
-        "palma abierta": "[emotion:neutral] Sí... Rice espera.",
-        "dedo hacia arriba": "[emotion:thinking] ¿Eh? ¿Hay algo arriba, Onii-sama?",
-        puño: "[emotion:surprised] ¡Ganbaru! Rice tambien se esforzara.",
+        cabeza: "[emotion:happy] E-ehehe... me gusta mucho...",
+        orejas: "[emotion:surprised] ¡Hyaa! Las orejas me dan cosquillas...",
+        mejillas: "[emotion:shy] U-um... me estoy poniendo toda roja...",
+        cara: "[emotion:surprised] ¿Eh? ¿Tengo algo en la cara?",
+        pelo: "[emotion:happy] Hoy me peine con cuidado... ¿te gusta?",
+        manos: "[emotion:shy] Tu mano es muy calida...",
+        brazos: "[emotion:surprised] ¿Sí? ¿Puedo ayudarte en algo?",
+        hombros: "[emotion:surprised] ¿Sí? ¿Puedo ayudarte en algo?",
+        "saludo con la mano": "[emotion:happy] ¡Hola! Yo tambien te saludo.",
+        "pulgar arriba": "[emotion:happy] ¡Gracias! Me esforzare aun mas.",
+        "pulgar abajo": "[emotion:sad] Lo siento... lo hare mejor la proxima vez.",
+        "signo de victoria (V)": "[emotion:happy] ¡Victoria!",
+        "te quiero (mano)": "[emotion:shy] Y-yo tambien te quiero mucho...",
+        "palma abierta": "[emotion:neutral] Sí... te espero.",
+        "dedo hacia arriba": "[emotion:thinking] ¿Eh? ¿Hay algo arriba?",
+        puño: "[emotion:surprised] ¡Animo! Yo tambien me esforzare.",
       };
-      const fallback = touch[1].startsWith("Caricia")
-        ? "[emotion:shy] E-eh... Onii-sama, eso no... A Rice le da mucha verguenza..."
-        : "[emotion:happy] Rice lo vio, Onii-sama.";
+      const fallback = touch[1].startsWith("Caricia") ? "[emotion:shy] E-eh... eso me da mucha verguenza..." : "[emotion:happy] Lo vi.";
       yield canned[touch[2]] ?? fallback;
       return;
     }
