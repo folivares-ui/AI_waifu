@@ -785,7 +785,7 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
 
   // ---------- weights ----------
   const weightsOf = (p: V3, part: number): [string, number][] => {
-    const headPart = part > 0;
+    const headPart = part === 1 || part === 2;
     const w = new Map<string, number>();
     const put = (b: string, v: number) => v > 0 && w.set(b, (w.get(b) ?? 0) + v);
     if (part === 2 && chains.length && p[1] < rootY + 0.02 * H) {
@@ -884,7 +884,7 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
       const q = axis(p[1]);
       const r = Math.hypot(p[0] - q[0], p[2] - q[2]);
       const reach = p[1] < l.ankle[1] + 0.01 * H ? 0.16 * H : 0.075 * H; // feet stick out forward
-      const onLeg = p[1] < crotch ? smooth((reach - r) / (0.02 * H)) : smooth((0.06 * H - r) / (0.02 * H)) * smooth((hipY - p[1]) / (hipY - crotch || 1));
+      const onLeg = part === 3 ? 0 : p[1] < crotch ? smooth((reach - r) / (0.02 * H)) : smooth((0.06 * H - r) / (0.02 * H)) * smooth((hipY - p[1]) / (hipY - crotch || 1));
       if (onLeg > 0) {
         const kn = smooth((l.knee[1] + 0.02 * H - p[1]) / (0.04 * H)); // 1 below the knee
         const an = smooth((l.ankle[1] + 0.012 * H - p[1]) / (0.024 * H)); // 1 below the ankle
@@ -937,6 +937,23 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
     return json.accessors!.length - 1;
   };
 
+  // Cloth hanging from the waist (a skirt, coat tails): a piece that comes down past the crotch and lies, in good
+  // part, away from the legs. It follows the hips as one: split between the legs and the hips it would tear
+  // apart at every step. (Legs, tights and boots hug the leg's line all the way down.)
+  const legDist = (q: V3) =>
+    Math.min(
+      ...[legL, legR].map((l) => {
+        const a = q[1] >= l.knee[1] ? lerp(l.knee, l.hip, (q[1] - l.knee[1]) / (l.hip[1] - l.knee[1] || 1)) : lerp(l.ankle, l.knee, Math.max(0, (q[1] - l.ankle[1]) / (l.knee[1] - l.ankle[1] || 1)));
+        return Math.hypot(q[0] - a[0], q[2] - a[2]);
+      }),
+    );
+  const drape = (pc: { prim: { pos: V3[] }; verts: number[]; top: number }) => {
+    if (pc.top < hipY - 0.02 * H) return false; // (hangs from the waist)
+    const below = pc.verts.filter((i) => pc.prim.pos[i][1] < crotch && pc.prim.pos[i][1] > Y(0.08));
+    if (below.length < 20) return false;
+    const away = below.filter((i) => legDist(pc.prim.pos[i]) > 0.075 * H).length;
+    return away / below.length > 0.25;
+  };
   const skins = new Map<number, number>(); // mesh node -> skin
   for (const p of prims) {
     if (!skins.has(p.node)) {
@@ -948,8 +965,12 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
       skins.set(p.node, json.skins.length - 1);
       json.nodes[p.node].skin = json.skins.length - 1;
     }
-    const part = new Uint8Array(p.pos.length); // 0 body, 1 head, 2 hanging hair
-    for (const pc of allPieces) if (pc.prim === p && pc.headPart) for (const i of pc.verts) part[i] = hairPiece(pc) ? 2 : 1;
+    const part = new Uint8Array(p.pos.length); // 0 body, 1 head, 2 hanging hair, 3 drape (skirt, coat tails)
+    for (const pc of allPieces) {
+      if (pc.prim !== p) continue;
+      if (pc.headPart) for (const i of pc.verts) part[i] = hairPiece(pc) ? 2 : 1;
+      else if (drape(pc)) for (const i of pc.verts) part[i] = 3;
+    }
     const jb = Buffer.alloc(p.pos.length * 8);
     const wb = Buffer.alloc(p.pos.length * 16);
     p.pos.forEach((v, i) => {
