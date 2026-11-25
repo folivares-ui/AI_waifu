@@ -60,9 +60,10 @@
     }
   ],
   "motion": {
-    "energy": 0.9,
-    "tempo": 0.95,
-    "bounce": 0.1,
-    "fidget": 0.35
+    "energy": 0.8,
+    "tempo": 0.9,
+    "bounce": 0,
+    "fidget": 0.25,
+    "armRelax": 0.7
   }
 }

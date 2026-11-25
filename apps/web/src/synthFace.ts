@@ -37,7 +37,7 @@ export interface FaceMorphs {
   brows: { mesh: number; verts: number[] }[];
   /** Eyes that get new eyelids instead of stretched skin. */
   curtains: CurtainEye[];
-  info: { eyes: number; gap: number[]; mouthWidth?: number; moved: number };
+  info: { eyes: number; gap: number[]; mouthWidth?: number; moved: number; restClose?: number };
 }
 
 /** Channels built for faces with no bones at all (eyebrows and mouth shapes). */
@@ -508,6 +508,8 @@ interface Mouth {
   cz: number;
   half: number; // half width (centre to corner)
   lip: (x: number) => number;
+  /** How far apart the lips are in the middle (a mouth modelled open). */
+  gap: number;
 }
 
 /** The mouth slit: a hole of the face mesh between the two corners, much wider than tall. */
@@ -533,6 +535,8 @@ function findMouth(meshes: FaceMeshIn[], face: number, corners: [V3, V3]): Mouth
   };
   const lx = mn[0];
   const rx = mx[0];
+  const mid = best.filter((p) => Math.abs(p[0] - (mn[0] + mx[0]) / 2) < (mx[0] - mn[0]) * 0.15);
+  const gap = mid.length ? Math.max(...mid.map((p) => p[1])) - Math.min(...mid.map((p) => p[1])) : 0;
   const ly = lineY(lx + 0.0005) ?? cy;
   const ry = lineY(rx - 0.0005) ?? cy;
   return {
@@ -541,6 +545,7 @@ function findMouth(meshes: FaceMeshIn[], face: number, corners: [V3, V3]): Mouth
     cz: mx[2],
     half: Math.max(half, (rx - lx) / 2),
     lip: (x) => (x <= lx ? ly : x >= rx ? ry : lineY(x) ?? ly + ((x - lx) / (rx - lx)) * (ry - ly)),
+    gap,
   };
 }
 
@@ -900,12 +905,16 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
   if (expressive) moved += eyebrows(meshes, comps, found, eyes, put, brows);
 
   let mouthWidth: number | undefined;
+  let restClose: number | undefined;
   const corners = mouthCorners ?? (eyes.length === 2 ? guessMouthCorners(meshes[found[0].face], eyes as [V3, V3]) : undefined);
   if (corners) {
     const mo = findMouth(meshes, found[0].face, corners);
     if (mo) {
       mouthWidth = mo.half * 2;
       const drop = Math.min(0.012, 0.3 * mouthWidth); // ~9 mm on a 3 cm wide mouth
+      // A mouth modelled open (lips apart, teeth showing): at rest the jaw is raised until the lips meet.
+      if (import.meta.env?.DEV) console.info(`[avatar] mouth slit: width ${mouthWidth.toFixed(4)} gap ${mo.gap.toFixed(4)} at y ${mo.cy.toFixed(3)} z ${mo.cz.toFixed(3)}`);
+      if (mo.gap > 0.15 * mouthWidth) restClose = Math.min(1.5, Math.max(0, mo.gap - 0.0008) / drop);
       const face = found[0].face;
       const fm = meshes[face];
       // The lower lip and chin: the skin connected to the chin without crossing the slit. Going round the
@@ -1023,7 +1032,7 @@ export function buildFaceMorphs(meshes: FaceMeshIn[], eyes: V3[], mouthCorners?:
         ballZ: (x: number, y: number) => eye.ball.get(x, y),
       };
     });
-  return { upper, lower, mouth, extra, brows, curtains, info: { eyes: found.length, gap: found.map((f) => f.eye.gmax), mouthWidth, moved } };
+  return { upper, lower, mouth, extra, brows, curtains, info: { eyes: found.length, gap: found.map((f) => f.eye.gmax), mouthWidth, moved, restClose } };
 }
 
 // ---------- three.js glue ----------
@@ -1040,6 +1049,8 @@ export interface LidWeights {
 /** Morph targets installed on the model's meshes, driven by the face rig's channels. */
 export class SynthFace {
   private slots: { mesh: THREE.Mesh; upper?: number; lower?: number; mouth?: number; extra: [string, number][] }[] = [];
+  /** Mouth modelled open: how much the jaw is raised at rest so the lips meet (in units of the open morph). */
+  restClose = 0;
   readonly hasEyes: boolean;
   readonly hasMouth: boolean;
   /** Eyebrow / mouth-shape channels it built (faces with no bones at all). */
@@ -1163,6 +1174,7 @@ export class SynthFace {
       slots.push(slot);
     });
     const face = new SynthFace(slots, res.info.eyes > 0, res.info.mouthWidth !== undefined, Object.keys(res.extra));
+    face.restClose = res.info.restClose ?? 0;
     for (const ce of res.curtains) {
       const c = EyeCurtain.build(head, ce, used[ce.face], inputs[ce.face].pos);
       if (c) face.curtains.push(c);
@@ -1209,6 +1221,9 @@ export class SynthFace {
           continue;
         }
         const m = used[mi];
+        // (its own copy of the material: the same material often draws the face and the inside of the mouth too,
+        // which must stay behind the skin)
+        m.material = Array.isArray(m.material) ? m.material.map((x) => x.clone()) : m.material.clone();
         for (const mat of [m.material].flat()) {
           mat.depthTest = false;
           mat.depthWrite = false;
@@ -1265,7 +1280,7 @@ export class SynthFace {
       if (!inf) continue;
       if (s.upper !== undefined) inf[s.upper] = upper;
       if (s.lower !== undefined) inf[s.lower] = lower;
-      if (s.mouth !== undefined) inf[s.mouth] = open;
+      if (s.mouth !== undefined) inf[s.mouth] = open - this.restClose * (1 - Math.min(1, open));
       for (const [c, k] of s.extra) inf[k] = w[c] ?? 0;
     }
     for (const c of this.curtains) c.apply(upper);
