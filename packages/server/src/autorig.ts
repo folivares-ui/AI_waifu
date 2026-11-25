@@ -851,11 +851,12 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
       if ((p[0] - cx) * side < 0.05 * H) continue;
       const t = dot(sub(p, a.shoulder), a.d);
       const r = len(sub(sub(p, a.shoulder), scale(a.d, t)));
-      const radius = 0.045 * H + 0.04 * H * smooth(1 - t / (0.08 * H)); // wider at the shoulder (sleeves)
+      const radius = 0.045 * H + 0.025 * H * smooth(1 - t / (0.08 * H)); // wider at the shoulder (sleeves), not the chest
       if (t < -0.03 * H || r > radius) continue;
       const tE = dot(sub(a.elbow, a.shoulder), a.d);
       const tW = dot(sub(a.wrist, a.shoulder), a.d);
-      const toArm = smooth((t + 0.02 * H) / (0.045 * H)); // body -> arm at the shoulder
+      // body -> arm over the whole shoulder (a short blend creases and stretches the skin as the arm comes down)
+      const toArm = smooth((t + 0.03 * H) / (0.08 * H));
       const e = smooth((t - tE + 0.02 * H) / (0.04 * H));
       const h = smooth((t - tW + 0.012 * H) / (0.024 * H));
       put(`${s}UpperArm`, toArm * (1 - e));

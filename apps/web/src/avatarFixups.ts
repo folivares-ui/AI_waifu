@@ -137,6 +137,12 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
   if (hairRoots.length) {
     const colliders = bodyColliders(vrm);
     const group = { colliders, name: "body" };
+    // Hair lying on the shoulders is part of the head's hair there (half of each strand follows the head): pushed
+    // off the shoulders it would be torn. Only lower down do the arms push it aside.
+    const Hb = vrm.humanoid;
+    const armBones = new Set(["leftShoulder", "rightShoulder", "leftUpperArm", "rightUpperArm"].map((b) => Hb.getRawBoneNode(b as never)).filter(Boolean));
+    const upperGroup = { colliders: colliders.filter((c) => !armBones.has(c.parent!)), name: "body (no shoulders)" };
+    const shoulderLine = (Hb.getRawBoneNode("leftUpperArm")?.getWorldPosition(new THREE.Vector3()).y ?? 1.2);
     const size = (vrm.humanoid.getRawBoneNode("head")?.getWorldPosition(new THREE.Vector3()).y ?? 1.35) / 0.85; // her height
     for (const root of hairRoots) {
       // the first link (around the face, down to the chin) stays with the head: only below it does hair swing,
@@ -165,7 +171,8 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
         const settings = flare
           ? { stiffness: 0.6, dragForce: 0.4, gravityPower: 0.3, gravityDir: pull, hitRadius: 0.02 * size }
           : { stiffness: 0.55 + (1 - hang) * 3, dragForce: 0.35, gravityPower: 0.35 * hang * hang, gravityDir: new THREE.Vector3(0, -1, 0), hitRadius: 0.02 * size };
-        mgr.addJoint(new VRMSpringBoneJoint(o, next, settings, [group])); // (a lock of hair is about this thick)
+        const high = next.getWorldPosition(new THREE.Vector3()).y > shoulderLine - 0.08 * size;
+        mgr.addJoint(new VRMSpringBoneJoint(o, next, settings, [high ? upperGroup : group])); // (a lock of hair is about this thick)
         count++;
         o = next;
       }
