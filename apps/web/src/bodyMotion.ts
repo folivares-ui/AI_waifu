@@ -151,15 +151,28 @@ export function bodyPose(s: BodyState): BodyPose {
   }
 
   // Fidgeting (restless characters): every few seconds one small spontaneous move, eased in and out.
+  // (only from a pose with the arms hanging: added to hands already placed somewhere, at the chest, together in
+  // front, it would twist the arm into a shape no elbow makes)
+  const hanging = s.emotion === "neutral" || s.emotion === "happy";
   if (fidgetAmt > 0 && !s.speaking && s.emotion !== "angry" && s.emotion !== "thinking") {
     const slot = Math.floor(t / 3.2);
     const phase = (t / 3.2) % 1;
     const k = fidgetAmt * Math.sin(Math.PI * Math.min(1, phase * 1.25)) ** 2; // 0 -> 1 -> 0 within the slot
     const move = Math.floor(rnd(slot + 77) * 5);
     if (move === 0) {
-      // hand on the hip (left)
-      pose.leftUpperArm = add(pose.leftUpperArm, [0.25 * k, 0, 0.35 * k]);
-      pose.leftLowerArm = add(pose.leftLowerArm, [0, -1.1 * k, 0]);
+      // hand on the hip (left): towards the pose solved for her body if there is one (her hip is where it is,
+      // whatever her proportions), else a generic one
+      if (hanging) {
+        const hips = s.arms?.hips;
+        if (hips) {
+          const mix = (a: Euler3 | undefined, b: Euler3): Euler3 => (a ? [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k] : b);
+          pose.leftUpperArm = mix(pose.leftUpperArm, hips.upper);
+          pose.leftLowerArm = mix(pose.leftLowerArm, [0, hips.lower, 0]);
+        } else {
+          pose.leftUpperArm = add(pose.leftUpperArm, [0.25 * k, 0, 0.35 * k]);
+          pose.leftLowerArm = add(pose.leftLowerArm, [0, -1.1 * k, 0]);
+        }
+      }
     } else if (move === 1) {
       // shoulder roll / shrug
       pose.leftShoulder = add(pose.leftShoulder, [0, 0, 0.12 * k]);
@@ -167,7 +180,7 @@ export function bodyPose(s: BodyState): BodyPose {
     } else if (move === 2) {
       // torso twist to one side
       pose.spine = add(pose.spine, [0, 0.12 * k * (rnd(slot) > 0.5 ? 1 : -1), 0]);
-    } else if (move === 3) {
+    } else if (move === 3 && hanging) {
       // arms swing forward and back once, like shaking off energy (one smooth swing per slot)
       const swing = Math.sin(phase * 2 * Math.PI);
       pose.leftUpperArm = add(pose.leftUpperArm, [-0.2 * k * swing, 0, 0]);
@@ -198,7 +211,9 @@ export function bodyPose(s: BodyState): BodyPose {
     const wL = prev.left + (cur.left - prev.left) * blend;
     const wR = prev.right + (cur.right - prev.right) * blend;
     // A slow, even beat (the voice level is already smoothed by the caller).
-    const beat = Math.min(1, 0.35 + s.level * 1.4) * (0.8 + 0.2 * Math.sin(t * 2.6)) * Math.min(1.6, energy);
+    // (smaller when the hands are already placed: on the hips, at the chest, together, crossed)
+    const placed = s.emotion === "angry" || s.emotion === "surprised" || s.emotion === "shy" ? 0.35 : 1;
+    const beat = Math.min(1, 0.35 + s.level * 1.4) * (0.8 + 0.2 * Math.sin(t * 2.6)) * Math.min(1.6, energy) * placed;
     const g = (k: number): [Euler3, Euler3] => [[-0.32 * k, 0, 0.18 * k], [0, -0.75 * k, 0]];
     if (wL > 0) {
       const [u, l] = g(beat * wL);
@@ -213,6 +228,12 @@ export function bodyPose(s: BodyState): BodyPose {
       pose.rightHand = add(pose.rightHand, mirror([0, 0, 0.25 * beat * wR]));
     }
   }
+  // An elbow only bends one way, and not all the way: whatever was added up above, the forearm never bends
+  // backwards (left: y < 0 bends it forward; right: y > 0) nor folds onto the upper arm.
+  const elbow = (e: Euler3 | undefined, sign: number): Euler3 | undefined =>
+    e && [e[0], sign * Math.min(2.6, Math.max(0.02, sign * e[1])), e[2]];
+  pose.leftLowerArm = elbow(pose.leftLowerArm, -1);
+  pose.rightLowerArm = elbow(pose.rightLowerArm, 1);
   return pose;
 }
 

@@ -1,4 +1,4 @@
-import { autoRig, needsRig, type RigGltf } from "./autorig.js";
+import { autoRig, needsRig, restShape, unskin, type RigGltf } from "./autorig.js";
 /**
  * Repairs VRM files whose humanoid bone list is empty (common in models converted from other formats, e.g.
  * Sketchfab exports): without it no VRM viewer can load them ("these humanoid bones are required but not exist").
@@ -550,14 +550,60 @@ const TARGET_HEIGHT = 1.58;
  * are unreadable) and a size far from a person's (some conversions lose a scale step: a 20 cm or 100 m model).
  * Throws with a readable message when the required bones cannot be recognised.
  */
+/**
+ * Whether the model's skeleton clearly does not fit its body (as some online auto-riggers leave it): the head
+ * joint far below the top of the head, together with the eyes far above the head joint or an arm whose elbow is
+ * on the other side of the body (front/back) from its shoulder. Then turning the head or moving an arm would tear
+ * the mesh. Compared to the body's height.
+ */
+export function brokenRig(json: Gltf, bin: Buffer): boolean {
+  if (!json.skins?.length) return false;
+  const hb: Record<string, number> = {};
+  const v1 = json.extensions?.VRMC_vrm?.humanoid?.humanBones;
+  const v0 = json.extensions?.VRM?.humanoid?.humanBones;
+  if (v1) for (const [b, x] of Object.entries(v1)) hb[b] = x.node;
+  if (v0) for (const x of v0) hb[x.bone === "leftThumbProximal" ? "leftThumbMetacarpal" : x.bone] = x.node;
+  if (hb.head === undefined) return false;
+  let ys: number[];
+  try {
+    ys = restShape(json as unknown as RigGltf, bin, true).flatMap((p) => p.pos.map((v) => v[1]));
+  } catch {
+    return false;
+  }
+  if (ys.length < 100) return false;
+  ys.sort((a, b) => a - b);
+  const lo = ys[Math.floor(ys.length * 0.001)], hi = ys[Math.floor(ys.length * 0.999)];
+  const H = hi - lo;
+  if (!(H > 0)) return false;
+  const W = worldMatrices(json);
+  const y = (b: string) => (hb[b] !== undefined ? W[hb[b]][13] : undefined);
+  const z = (b: string) => (hb[b] !== undefined ? W[hb[b]][14] : undefined);
+  const headLow = (hi - y("head")!) / H > 0.25;
+  const eye = y("leftEye") ?? y("rightEye");
+  const eyesHigh = eye !== undefined && (eye - y("head")!) / H > 0.12;
+  const armSwap = (["left", "right"] as const).some((s) => {
+    const a = z(`${s}UpperArm`), b = z(`${s}LowerArm`);
+    return a !== undefined && b !== undefined && Math.abs(a - b) / H > 0.12;
+  });
+  return headLow && (eyesHigh || armSwap);
+}
+
 export function fixVrm(buf: Buffer): { fixed: Buffer; bones: number; scale?: number; rigged?: boolean } | undefined {
   const read = readGlb(buf);
   const json = read.json;
   let bin = read.bin;
   const v1 = json.extensions?.VRMC_vrm;
   const v0 = json.extensions?.VRM;
-  const empty1 = v1 && Object.keys(v1.humanoid?.humanBones ?? {}).length === 0;
-  const empty0 = v0 && (v0.humanoid?.humanBones ?? []).length === 0;
+  let empty1 = v1 && Object.keys(v1.humanoid?.humanBones ?? {}).length === 0;
+  let empty0 = v0 && (v0.humanoid?.humanBones ?? []).length === 0;
+  if (!empty1 && !empty0 && bin && brokenRig(json, bin)) {
+    // A skeleton that does not fit the body (see brokenRig): take it off and rig the model again from its shape.
+    bin = unskin(json as unknown as RigGltf, bin);
+    if (v1) v1.humanoid = { ...(v1.humanoid ?? {}), humanBones: {} };
+    if (v0) v0.humanoid = { ...(v0.humanoid ?? {}), humanBones: [] };
+    empty1 = !!v1;
+    empty0 = !!v0;
+  }
   const height = modelHeight(json, bin);
   const scale = height !== undefined && (height < 0.6 || height > 4) ? TARGET_HEIGHT / height : undefined;
   const rig = (empty1 || empty0) && bin !== undefined && needsRig(json as unknown as RigGltf);

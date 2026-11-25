@@ -29,6 +29,7 @@ describe("characters", () => {
       ["nicole", "Nicole", true],
       ["rebecca", "Rebecca", true],
       ["ronova", "Ronova", true],
+      ["yangyang", "Yangyang", true],
     ]);
     expect(c.load("nicole").owner?.honorific).toBe("Proxy");
     expect(c.load("nicole").look).toEqual({ brightness: 0.78 }); // only her model is drawn darker

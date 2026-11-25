@@ -376,6 +376,146 @@ export interface RigResult {
 }
 
 /** True when the file has meshes but no skeleton at all. */
+/**
+ * The model's meshes in world space: one array of points per primitive of each mesh node. `bind`: skinned meshes
+ * as they were modelled (their bind pose, the vertices as stored), else as they look at rest (skinning applied).
+ */
+export function restShape(json: RigGltf, bin: Buffer, bind = false): { node: number; prim: number; pos: V3[]; normal?: V3[]; blend?: M4[] }[] {
+  const W = worldMatrices(json);
+  const jm = (json.skins ?? []).map((s) => {
+    const ibm = s.inverseBindMatrices !== undefined ? readAcc(json, bin, s.inverseBindMatrices) : s.joints.map(() => IDENTITY);
+    return s.joints.map((j, k) => mul(W[j], ibm[k]));
+  });
+  const out: ReturnType<typeof restShape> = [];
+  json.nodes.forEach((n, ni) => {
+    if (n.mesh === undefined) return;
+    json.meshes![n.mesh].primitives.forEach((p, pi) => {
+      const local = readAcc(json, bin, p.attributes.POSITION);
+      const nrm = p.attributes.NORMAL !== undefined ? readAcc(json, bin, p.attributes.NORMAL) : undefined;
+      const skin = n.skin !== undefined ? jm[n.skin] : undefined;
+      if (!skin || p.attributes.JOINTS_0 === undefined || p.attributes.WEIGHTS_0 === undefined || bind) {
+        const m = skin && bind ? IDENTITY : W[ni]; // (a skinned mesh's own node transform does not apply to it)
+        out.push({ node: ni, prim: pi, pos: local.map((v) => apply(m, v)), normal: nrm?.map((v) => dirOf(m, v)), blend: local.map(() => m) });
+        return;
+      }
+      const js = readAcc(json, bin, p.attributes.JOINTS_0);
+      const wa = json.accessors![p.attributes.WEIGHTS_0];
+      const norm = wa.componentType === 5121 ? 255 : wa.componentType === 5123 ? 65535 : 1;
+      const ws = readAcc(json, bin, p.attributes.WEIGHTS_0).map((w) => w.map((x) => x / norm));
+      const blend = local.map((_, i) => {
+        const m = new Array(16).fill(0);
+        let t = 0;
+        for (let k = 0; k < 4; k++) {
+          const w = ws[i][k];
+          if (!w) continue;
+          t += w;
+          const jmk = skin[js[i][k]] ?? IDENTITY;
+          for (let e = 0; e < 16; e++) m[e] += w * jmk[e];
+        }
+        return t > 0 ? m.map((x) => x / t) : W[ni];
+      });
+      out.push({ node: ni, prim: pi, pos: local.map((v, i) => apply(blend[i], v)), normal: nrm?.map((v, i) => dirOf(blend[i], v)), blend });
+    });
+  });
+  return out;
+}
+
+const IDENTITY: M4 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+function dirOf(m: M4, v: number[]): V3 {
+  const d: V3 = [0, 1, 2].map((r) => m[r] * v[0] + m[4 + r] * v[1] + m[8 + r] * v[2]) as V3;
+  const l = Math.hypot(...d) || 1;
+  return [d[0] / l, d[1] / l, d[2] / l];
+}
+
+/**
+ * Takes the skeleton off a model (its meshes keep the shape they were modelled in), so it
+ * can be rigged again from its shape: for models whose skeleton does not match the body (e.g. from an online
+ * auto-rigger that put the head joint at the chest). Returns the new BIN chunk.
+ */
+export function unskin(json: RigGltf, binIn: Buffer): Buffer {
+  const W = worldMatrices(json);
+  // the shape as modelled: a skeleton that does not fit the body would have bent it out of shape at rest
+  const shape = restShape(json, binIn, true);
+  let bin = binIn;
+  const addAccessor = (data: Buffer, acc: Omit<Acc, "bufferView">) => {
+    const r = appendBin(json, bin, data);
+    bin = r.bin;
+    json.bufferViews!.push({ buffer: 0, byteOffset: r.offset, byteLength: data.length });
+    json.accessors!.push({ ...acc, bufferView: json.bufferViews!.length - 1 });
+    return json.accessors!.length - 1;
+  };
+  const vec3 = (pts: V3[], withBounds: boolean) => {
+    const b = Buffer.alloc(pts.length * 12);
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    pts.forEach((v, i) => v.forEach((x, c) => {
+      b.writeFloatLE(x, i * 12 + c * 4);
+      lo[c] = Math.min(lo[c], x);
+      hi[c] = Math.max(hi[c], x);
+    }));
+    return addAccessor(b, { componentType: 5126, count: pts.length, type: "VEC3", ...(withBounds ? { min: lo, max: hi } : {}) });
+  };
+  const jointSet = new Set((json.skins ?? []).flatMap((s) => s.joints));
+  for (const sh of shape) {
+    const node = json.nodes[sh.node];
+    const prim = json.meshes![node.mesh!].primitives[sh.prim] as Prim & { targets?: Record<string, number>[] };
+    if (node.skin === undefined && !prim.attributes.JOINTS_0) continue;
+    // the mesh node may sit anywhere: its vertices are stored in its own frame
+    const inv = invert(W[sh.node]);
+    prim.attributes.POSITION = vec3(sh.pos.map((v) => apply(inv, v)), true);
+    if (sh.normal) prim.attributes.NORMAL = vec3(sh.normal.map((v) => dirOf(inv, v)), false);
+    // morph targets are offsets in the old bind frame: turn them with each vertex's own skinning
+    prim.targets?.forEach((t) => {
+      for (const key of ["POSITION", "NORMAL"]) {
+        if (t[key] === undefined) continue;
+        const d = readAcc(json, binIn, t[key]);
+        const turned = d.map((v, i) => {
+          const m = mul(inv, sh.blend![i]);
+          const r: V3 = [0, 1, 2].map((c) => m[c] * v[0] + m[4 + c] * v[1] + m[8 + c] * v[2]) as V3;
+          return r;
+        });
+        t[key] = vec3(turned, key === "POSITION");
+      }
+    });
+    delete prim.attributes.JOINTS_0;
+    delete prim.attributes.WEIGHTS_0;
+    delete node.skin;
+  }
+  json.skins = [];
+  // the old skeleton leaves the scene (anything that is not a joint under it moves up to the scene's root)
+  const parent = new Map<number, number>();
+  json.nodes.forEach((n, i) => n.children?.forEach((c) => parent.set(c, i)));
+  const scene = json.scenes?.[json.scene ?? 0];
+  const keep = (i: number, under: number | undefined) => {
+    // re-attach a non-joint node found below a joint to the first non-joint ancestor (or the scene), keeping its place
+    const n = json.nodes[i];
+    const w = W[i];
+    if (under === undefined) (scene!.nodes ??= []).push(i);
+    else (json.nodes[under].children ??= []).push(i);
+    const pw = under === undefined ? IDENTITY : W[under];
+    n.matrix = mul(invert(pw), w);
+    delete n.translation;
+    delete n.rotation;
+    delete n.scale;
+  };
+  const walk = (i: number, anchor: number | undefined) => {
+    for (const c of [...(json.nodes[i].children ?? [])]) {
+      if (!jointSet.has(c)) {
+        json.nodes[i].children = json.nodes[i].children!.filter((k) => k !== c);
+        keep(c, anchor);
+      } else walk(c, anchor);
+    }
+  };
+  for (const j of jointSet) {
+    const p = parent.get(j);
+    if (p !== undefined && jointSet.has(p)) continue; // only the top of each skeleton
+    if (p !== undefined) json.nodes[p].children = json.nodes[p].children!.filter((c) => c !== j);
+    else if (scene?.nodes) scene.nodes = scene.nodes.filter((c) => c !== j);
+    walk(j, p);
+  }
+  for (const n of json.nodes) if (n.children && !n.children.length) delete n.children;
+  return bin;
+}
+
 export function needsRig(json: RigGltf): boolean {
   return !json.skins?.length && json.nodes.some((n) => n.mesh !== undefined);
 }
@@ -404,7 +544,46 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
   const armLine = (side: number) => {
     const pts = all.filter((p) => (p[0] - cx) * side > 0.17 * H && p[1] > Y(0.45));
     if (pts.length < 20) throw new Error("no se encuentran los brazos (el modelo debe estar en pose T o A)");
+    // (through the middle of each slice across the arm: a wide sleeve or cape would tilt a plain fit of all its
+    // points towards the front or back)
+    const mids: V3[] = [];
+    const med = (a: number[]) => a.sort((x, y) => x - y)[Math.floor(a.length / 2)];
+    const step = 0.02 * H;
+    const bins = new Map<number, V3[]>();
+    for (const p of pts) {
+      const k = Math.floor(((p[0] - cx) * side) / step);
+      (bins.get(k) ?? bins.set(k, []).get(k)!).push(p);
+    }
+    // (the innermost quarter can still catch hair or a cape beside the shoulder: left out)
+    const reach0 = Math.max(...pts.map((p) => (p[0] - cx) * side));
+    const inner = 0.17 * H + 0.25 * (reach0 - 0.17 * H);
+    for (const b of bins.values()) {
+      if (b.length < 3 || med(b.map((p) => (p[0] - cx) * side)) < inner) continue;
+      mids.push([med(b.map((p) => p[0])), med(b.map((p) => p[1])), med(b.map((p) => p[2]))]);
+    }
     let { c, d } = fitLine(pts);
+    // (only when the plain fit runs steeply front to back, which an arm in a T- or A-pose does not)
+    const detailed = pts.length > 300 && mids.length >= 5 && Math.abs(d[2]) > 0.35;
+    if (detailed) ({ c, d } = fitLine(mids));
+    if (detailed) {
+      // Its depth (front to back): near the shoulder, long hair falling down the back (or a wide sleeve) would pull
+      // it backwards, so the arm runs from the body's middle depth (that of the thighs, where nothing hangs over
+      // them) at the shoulder to the middle of its outer half.
+      const reach = Math.max(...pts.map((p) => (p[0] - cx) * side));
+      const outer = pts.filter((p) => (p[0] - cx) * side > (0.17 * H + reach) / 2);
+      const thighs = all.filter((p) => p[1] > Y(0.25) && p[1] < Y(0.35)).map((p) => p[2]);
+      if (outer.length >= 10 && thighs.length >= 10) {
+        const xo = med(outer.map((p) => p[0])), zo = med(outer.map((p) => p[2]));
+        const xs = cx + side * 0.1 * H, zs = med(thighs);
+        const l = Math.hypot(d[0], d[1]) || 1;
+        const dx = d[0] / l, dy = d[1] / l;
+        const yo = c[1] + (dy / (dx || 1e-6)) * (xo - c[0]);
+        const slope = (zo - zs) / (xo - xs || 1e-6);
+        const dd: V3 = [dx, dy, slope * dx];
+        d = scale(dd, 1 / len(dd));
+        c = [xo, yo, zo];
+      }
+    }
     if (d[0] * side < 0) d = scale(d, -1); // pointing out, towards the hand
     const tip = pts.reduce((a, b) => (dot(sub(b, c), d) > dot(sub(a, c), d) ? b : a));
     const along = (x: number) => add(c, scale(d, (x - c[0]) / (d[0] || 1e-6))); // point of the line at a given x
@@ -465,8 +644,27 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
     const pts = all.filter((p) => Math.abs(p[1] - y) < 0.01 * H && Math.abs(p[0] - cx) < halfW);
     return pts.length ? (Math.min(...pts.map((p) => p[2])) + Math.max(...pts.map((p) => p[2]))) / 2 : 0;
   };
-  const neckY = shoulderY + 0.025 * H;
-  const headY = neckY + 0.04 * H;
+  let neckY = shoulderY + 0.025 * H;
+  let headY = neckY + 0.04 * H;
+  // A big head (stylised proportions) reaches lower than usual: the head turns from just below the chin. The chin
+  // is where the front of the face steps back to the neck (looking down the middle of the body, below the
+  // usual head height): only ever lowers the head.
+  {
+    const front = (y: number) => {
+      const z = all.filter((p) => Math.abs(p[1] - y) < 0.005 * H && Math.abs(p[0] - cx) < 0.015 * H).map((p) => p[2]);
+      return z.length >= 3 ? Math.max(...z) : undefined;
+    };
+    let prev = front(headY);
+    for (let y = headY - 0.01 * H; y > shoulderY + 0.03 * H; y -= 0.01 * H) {
+      const f = front(y);
+      if (f !== undefined && prev !== undefined && f < prev - 0.015 * H) {
+        headY = y + 0.005 * H;
+        neckY = Math.min(neckY, headY - 0.03 * H);
+        break;
+      }
+      if (f !== undefined) prev = f;
+    }
+  }
   const at = (y: number, halfW = 0.08 * H): V3 => [cx, y, depthAt(y, halfW)];
   const J: Record<string, V3> = {
     hips: at(hipY),

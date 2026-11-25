@@ -144,7 +144,10 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
       for (let o: THREE.Object3D | undefined = first; o; ) {
         const next: THREE.Object3D | undefined = o.children.find((c) => /^rig_hair_\d+_\d+$/.test(c.name));
         if (!next) break; // the last joint is the tip: nothing hangs from it
-        mgr.addJoint(new VRMSpringBoneJoint(o, next, { stiffness: 0.55, dragForce: 0.35, gravityPower: 0.35, gravityDir: new THREE.Vector3(0, -1, 0), hitRadius: 0.02 * size }, [group])); // (a lock of hair is about this thick)
+        // (hair that does not hang straight down, e.g. flaring out, keeps its shape instead of collapsing)
+        const d = next.getWorldPosition(new THREE.Vector3()).sub(o.getWorldPosition(new THREE.Vector3())).normalize();
+        const hang = Math.max(0, -d.y);
+        mgr.addJoint(new VRMSpringBoneJoint(o, next, { stiffness: 0.55 + (1 - hang) * 3, dragForce: 0.35, gravityPower: 0.35 * hang * hang, gravityDir: new THREE.Vector3(0, -1, 0), hitRadius: 0.02 * size }, [group])); // (a lock of hair is about this thick)
         count++;
         o = next;
       }

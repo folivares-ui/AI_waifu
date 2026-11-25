@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { autoRig, needsRig, type RigGltf } from "./autorig.js";
-import { fixVrm, readGlb, writeGlb } from "./vrmfix.js";
+import { brokenRig, fixVrm, readGlb, worldMatrices, writeGlb } from "./vrmfix.js";
 
 /** A statue made of boxes (1.6 m, facing +z, arms in an A-pose), with no skeleton, as a VRM 1.0 file. */
 function statue() {
@@ -113,5 +113,27 @@ describe("rigging a model that has no skeleton", () => {
     expect(["chest", "upperChest", "neck", "leftShoulder"]).toContain(main(near(0.09 * H, 0.82 * H, 0.05 * H))); // torso (a box corner at the shoulders)
     // weights add up to 1
     for (let i = 0; i < pos.length / 3; i += 37) expect(wt(i, 0) + wt(i, 1) + wt(i, 2) + wt(i, 3)).toBeCloseTo(1, 5);
+  });
+  it("takes off a skeleton that does not fit the body and rigs the model again", () => {
+    const { glb, H } = statue();
+    const good = fixVrm(glb)!.fixed;
+    const { json, bin } = readGlb(good);
+    const hb = json.extensions!.VRMC_vrm!.humanoid!.humanBones!;
+    expect(brokenRig(json, bin!)).toBe(false);
+    const headY = worldMatrices(json)[hb.head.node][13];
+    // as an online auto-rigger can leave it: the head joint down at the chest, an elbow far behind the shoulder
+    const nodes = json.nodes as { translation?: number[] }[];
+    nodes[hb.head.node].translation![1] -= 0.3 * H;
+    nodes[hb.leftLowerArm.node].translation![2] -= 0.3 * H;
+    const broken = writeGlb(json, bin!);
+    expect(brokenRig(readGlb(broken).json, readGlb(broken).bin!)).toBe(true);
+    const r = fixVrm(broken)!;
+    expect(r.rigged).toBe(true);
+    const back = readGlb(r.fixed).json;
+    const hb2 = back.extensions!.VRMC_vrm!.humanoid!.humanBones!;
+    const W = worldMatrices(back);
+    expect(Math.abs(W[hb2.head.node][13] - headY)).toBeLessThan(0.02 * H); // the head joint is back where the head is
+    expect(back.skins!.length).toBe(1); // only the new skeleton
+    expect(fixVrm(r.fixed)).toBeUndefined();
   });
 });
