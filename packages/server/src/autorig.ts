@@ -856,7 +856,11 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
       const tE = dot(sub(a.elbow, a.shoulder), a.d);
       const tW = dot(sub(a.wrist, a.shoulder), a.d);
       // body -> arm over the whole shoulder (a short blend creases and stretches the skin as the arm comes down)
-      const toArm = smooth((t + 0.03 * H) / (0.08 * H));
+      // ... and only beside the body: the chest under the shoulder lies along the arm's line too (a sloping A-pose
+      // arm), but it is torso
+      const lateral = (p[0] - cx) * side;
+      const beside = smooth((lateral - 0.065 * H) / (0.045 * H));
+      const toArm = smooth((t + 0.03 * H) / (0.08 * H)) * beside;
       const e = smooth((t - tE + 0.02 * H) / (0.04 * H));
       const h = smooth((t - tW + 0.012 * H) / (0.024 * H));
       put(`${s}UpperArm`, toArm * (1 - e));
@@ -868,8 +872,10 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
         for (const [b, x] of fw.bones) put(`${s}${b}`, toArm * h * x);
       } else put(`${s}Hand`, toArm * h);
       if (toArm < 1) {
-        put(`${s}Shoulder`, (1 - toArm) * 0.6);
-        spine((1 - toArm) * 0.4);
+        // the top of the shoulder follows the collarbone; towards the neck and the chest, the spine
+        const sh = (1 - toArm) * 0.6 * smooth((lateral - 0.03 * H) / (0.05 * H));
+        put(`${s}Shoulder`, sh);
+        spine(1 - toArm - sh);
       }
       return [...w];
     }

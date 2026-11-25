@@ -125,6 +125,8 @@ const CHAIN_LINK = /^Sp_\w+_\d\d(_\d{3,4})?$/;
  * VRM spring-bone data. No colliders, so settings are stiff to keep hair from sinking into the body.
  * Returns undefined when the model already has springs or has no such chains.
  */
+const BACK_DOWN = new THREE.Vector3(0, -1, -0.4).normalize();
+
 export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
   if (vrm.springBoneManager && vrm.springBoneManager.joints.size > 0) return undefined;
   const mgr = new VRMSpringBoneManager();
@@ -154,22 +156,18 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
         if (o) chain.push(o);
       }
       const first = chain[chain.length > 4 ? 2 : 1];
-      // Long hair modelled flaring out to the side (it falls freely in the game, by its own physics): beside
-      // the arms it would stand out like wings. Such a lock is pulled in and back, towards the shoulder blades.
-      const W = (o: THREE.Object3D) => o.getWorldPosition(new THREE.Vector3());
-      const headX = W(vrm.humanoid.getRawBoneNode("head") ?? root).x;
-      const shoulderX = Math.abs(W(vrm.humanoid.getRawBoneNode("leftUpperArm") ?? root).x - headX);
-      const tipOff = W(chain[chain.length - 1]).x - headX;
-      const flare = Math.abs(tipOff) > shoulderX && Math.abs(tipOff) > Math.abs(W(first).x - headX) + 0.02 * size;
-      const pull = flare ? new THREE.Vector3(-Math.sign(tipOff) * 0.12, -1, -0.5).normalize() : new THREE.Vector3(0, -1, 0);
+      // Long hair falls a little backwards, towards the shoulder blades (in the game it rests on the back; some
+      // models have it flaring out to the sides, standing out like wings beside the arms). The same for every long
+      // lock: neighbouring locks share the strands between them, and pulled apart they would tear them.
+      const long = chain[chain.length - 1].getWorldPosition(new THREE.Vector3()).y < shoulderLine - 0.08 * size;
       for (let o: THREE.Object3D | undefined = first; o; ) {
         const next: THREE.Object3D | undefined = o.children.find((c) => /^rig_hair_\d+_\d+$/.test(c.name));
         if (!next) break; // the last joint is the tip: nothing hangs from it
         // (hair that does not hang straight down, e.g. flaring out, keeps its shape instead of collapsing)
         const d = next.getWorldPosition(new THREE.Vector3()).sub(o.getWorldPosition(new THREE.Vector3())).normalize();
         const hang = Math.max(0, -d.y);
-        const settings = flare
-          ? { stiffness: 0.6, dragForce: 0.4, gravityPower: 0.3, gravityDir: pull, hitRadius: 0.02 * size }
+        const settings = long
+          ? { stiffness: 0.6 + (1 - hang) * 1.5, dragForce: 0.4, gravityPower: 0.3, gravityDir: BACK_DOWN, hitRadius: 0.02 * size }
           : { stiffness: 0.55 + (1 - hang) * 3, dragForce: 0.35, gravityPower: 0.35 * hang * hang, gravityDir: new THREE.Vector3(0, -1, 0), hitRadius: 0.02 * size };
         const high = next.getWorldPosition(new THREE.Vector3()).y > shoulderLine - 0.08 * size;
         mgr.addJoint(new VRMSpringBoneJoint(o, next, settings, [high ? upperGroup : group])); // (a lock of hair is about this thick)
