@@ -138,15 +138,16 @@ export function bodyPose(s: BodyState): BodyPose {
   const hipK = s.style?.hipSway ?? 1;
   pose.hips = add(pose.hips, [0, 0.03 * shift * hipK, 0.035 * shift * hipK]);
   pose.spine = add(pose.spine, [0, 0, -0.03 * shift * hipK]); // the upper body stays upright
-  const freeL = Math.max(0, -shift);
-  const freeR = Math.max(0, shift);
+  // (the free leg bends less too: under a long skirt a thigh coming forward pushes through it)
+  const freeL = Math.max(0, -shift) * hipK;
+  const freeR = Math.max(0, shift) * hipK;
   pose.leftUpperLeg = [-0.07 * freeL, 0, -0.035 * shift];
   pose.leftLowerLeg = [0.16 * freeL, 0, 0];
   pose.rightUpperLeg = [-0.07 * freeR, 0, -0.035 * shift];
   pose.rightLowerLeg = [0.16 * freeR, 0, 0];
 
   // Bounce in the knees: when happy, and always for restless characters (bounce > 0).
-  const bounce = s.emotion === "happy" ? Math.max(1, bounceAmt * 1.3) : bounceAmt;
+  const bounce = (s.emotion === "happy" ? Math.max(1, bounceAmt * 1.3) : bounceAmt) * hipK;
   if (bounce > 0) {
     const b = bounce * (0.5 + 0.5 * Math.sin(t * 4.2));
     pose.leftUpperLeg = add(pose.leftUpperLeg, [-0.04 * b, 0, 0]);
