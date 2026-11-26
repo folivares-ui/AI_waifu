@@ -94,6 +94,8 @@ export interface MotionStyle {
   fidget?: number;
   /** 0..1: arms that hang loosely (elbows a little bent, forearms swaying) instead of straight. */
   armRelax?: number;
+  /** How much the hips sway and turn (0..1, default 1). Low for a long skirt or coat that would swing around the legs. */
+  hipSway?: number;
 }
 
 export interface VoiceHints {

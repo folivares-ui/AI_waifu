@@ -5,7 +5,7 @@ import { EMOTIONS, type LookStyle, type MotionStyle, type NameConfig, type Voice
 /** Keeps motion values in a sane range (a typo in a soul file must not make her spin). */
 function clampMotion(m: MotionStyle): MotionStyle {
   const c = (v: unknown, lo: number, hi: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : undefined);
-  return { energy: c(m.energy, 0.3, 2.5), tempo: c(m.tempo, 0.5, 2), bounce: c(m.bounce, 0, 1), fidget: c(m.fidget, 0, 1), armRelax: c(m.armRelax, 0, 1) };
+  return { energy: c(m.energy, 0.3, 2.5), tempo: c(m.tempo, 0.5, 2), bounce: c(m.bounce, 0, 1), fidget: c(m.fidget, 0, 1), armRelax: c(m.armRelax, 0, 1), hipSway: c(m.hipSway, 0, 1) };
 }
 
 export interface Soul {

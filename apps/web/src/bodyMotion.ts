@@ -133,8 +133,11 @@ export function bodyPose(s: BodyState): BodyPose {
 
   // Weight shift every few seconds: hips tilt, the free leg's knee bends a little.
   const shift = Math.sin(t * 0.42) * 0.5 + Math.sin(t * 0.17) * 0.5; // -1..1, slow and irregular
-  pose.hips = add(pose.hips, [0, 0.03 * shift, 0.035 * shift]);
-  pose.spine = add(pose.spine, [0, 0, -0.03 * shift]); // the upper body stays upright
+  // (the hips sway less for a character in a long skirt or coat: it hangs from them and would swing round the
+  // legs; her upper body still turns and sways)
+  const hipK = s.style?.hipSway ?? 1;
+  pose.hips = add(pose.hips, [0, 0.03 * shift * hipK, 0.035 * shift * hipK]);
+  pose.spine = add(pose.spine, [0, 0, -0.03 * shift * hipK]); // the upper body stays upright
   const freeL = Math.max(0, -shift);
   const freeR = Math.max(0, shift);
   pose.leftUpperLeg = [-0.07 * freeL, 0, -0.035 * shift];
@@ -189,8 +192,8 @@ export function bodyPose(s: BodyState): BodyPose {
       pose.rightUpperArm = add(pose.rightUpperArm, [0.2 * k * swing, 0, 0]);
     } else {
       // weight on one leg, hip popped
-      pose.hips = add(pose.hips, [0, 0, 0.06 * k]);
-      pose.spine = add(pose.spine, [0, 0, -0.06 * k]);
+      pose.hips = add(pose.hips, [0, 0, 0.06 * k * hipK]);
+      pose.spine = add(pose.spine, [0, 0, -0.06 * k * hipK]);
     }
   }
 

@@ -64,6 +64,7 @@
     "tempo": 0.9,
     "bounce": 0,
     "fidget": 0.25,
-    "armRelax": 0.7
+    "armRelax": 0.7,
+    "hipSway": 0.25
   }
 }
