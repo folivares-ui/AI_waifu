@@ -43,6 +43,8 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion,
   const [notice, setNotice] = useState<string>();
   const [toolStatus, setToolStatus] = useState<string>();
   const [approvals, setApprovals] = useState<Extract<ServerMessage, { type: "approval_request" }>[]>([]);
+  /** She has control of the screen for the current activity ("Darle el control"). */
+  const [control, setControl] = useState(false);
   const nextId = useRef(1);
   const currentTurn = useRef(0);
   // Server turn ids are sequential per connection (n-th user_text = turn n). Anything at or below
@@ -78,6 +80,7 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion,
       sock.onclose = () => {
         setConnected(false);
         setApprovals([]); // the server forgets pending approvals with the connection
+        setControl(false); // ... and any control given
         if (!closed) retry = setTimeout(connect, 2000);
       };
       sock.onmessage = (ev) => {
@@ -113,6 +116,8 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion,
           if (!dropped(m.turnId)) h.current.onAudio({ data: b64ToBuffer(m.data), emotion: m.emotion, text: m.text, speech: m.speech, turnId: m.turnId });
         } else if (m.type === "approval_request") {
           setApprovals((a) => [...a, m]);
+        } else if (m.type === "control") {
+          setControl(m.active);
         } else if (m.type === "approval_cancel") {
           setApprovals((a) => a.filter((x) => x.id !== m.id));
         } else if (m.type === "screen_request") {
@@ -184,11 +189,18 @@ export function useSoul(handlers: { onSentence: (text: string, emotion: Emotion,
       send({ type: "speech_lang", lang });
     },
     approvals,
-    answerApproval: (id: string, approved: boolean) => {
+    answerApproval: (id: string, approved: boolean, giveControl = false) => {
       const a = approvals.find((x) => x.id === id);
       setApprovals((list) => list.filter((x) => x.id !== id));
-      if (a) setLines((ls) => [...ls, { id: nextId.current++, who: "user", text: `${approved ? "✔ Permitido" : "✖ No permitido"}: ${a.summary}` }]);
-      send({ type: "approval_response", id, approved });
+      const what = giveControl ? "✔ Le diste el control hasta que termine" : approved ? "✔ Permitido" : "✖ No permitido";
+      if (a) setLines((ls) => [...ls, { id: nextId.current++, who: "user", text: `${what}: ${a.summary}` }]);
+      send({ type: "approval_response", id, approved, ...(giveControl ? { control: true } : {}) });
+    },
+    control,
+    /** Takes the screen back: her next click, text or key asks again. */
+    revokeControl: () => {
+      setControl(false);
+      send({ type: "control_revoke" });
     },
     interrupt: () => {
       ignoreUpTo.current = sent.current;

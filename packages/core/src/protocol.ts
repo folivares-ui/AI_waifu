@@ -31,7 +31,18 @@ export type ClientMessage =
   /** The language she should speak aloud from now on (e.g. "ja-JP" with Spanish subtitles); null = the soul's default. */
   | { type: "speech_lang"; lang: string | null }
   /** The user's answer to an `approval_request`. Only answers to pending requests are accepted. */
-  | { type: "approval_response"; id: string; approved: boolean }
+  | {
+      type: "approval_response";
+      id: string;
+      approved: boolean;
+      /**
+       * "Darle el control": also approve her next screen actions (clicks, typing, keys) until the activity she is
+       * doing now ends. Only honoured on a request marked `controllable`; risky actions still ask.
+       */
+      control?: boolean;
+    }
+  /** Takes back the control given with `approval_response.control` (her next screen action asks again). */
+  | { type: "control_revoke" }
   /** User started speaking / sent new input while the soul is talking: stop current turn. */
   | { type: "interrupt" }
   | { type: "hello" };
@@ -55,7 +66,9 @@ export type ServerMessage =
    * The soul wants to do something that changes things outside the conversation (save a file, click, type...).
    * Nothing happens unless the user approves. `details` is plain text (e.g. a diff or a script) to show verbatim.
    */
-  | { type: "approval_request"; id: string; tool: string; summary: string; details?: string; preview?: ScreenImage }
+  | { type: "approval_request"; id: string; tool: string; summary: string; details?: string; preview?: ScreenImage; /** The user may give her control of the screen from this card. */ controllable?: boolean }
+  /** She has (or no longer has) control of the screen for the current activity. */
+  | { type: "control"; active: boolean }
   /** A pending approval expired or its turn was cancelled: hide it. */
   | { type: "approval_cancel"; id: string }
   | { type: "done"; turnId: number; interrupted: boolean }

@@ -134,6 +134,12 @@ h1 { margin: 0; font-size: 1.15rem; font-weight: 800; letter-spacing: .01em; tex
 .approval-buttons .allow { background: linear-gradient(135deg, #2fb07a, #3ccf8e); }
 .approval-buttons .deny { background: rgba(255, 255, 255, .12); }
 .approval-tool { margin: 0; font-size: .7rem; color: var(--muted); }
+.approval .give-control { align-self: flex-end; padding: 8px 16px; border-radius: 999px; font-weight: 700; color: #fff; background: linear-gradient(135deg, #6a5cff, #9b6bff); }
+/* While she has control of the screen ("Darle el control"): always visible, with a way to take it back */
+.control-banner { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 16px; background: rgba(255, 170, 40, .18); border: 1px solid rgba(255, 170, 40, .6); }
+.control-banner span { flex: 1; line-height: 1.35; font-size: .85rem; }
+.control-banner small { display: block; color: var(--muted); }
+.control-banner button { padding: 8px 16px; border-radius: 999px; font-weight: 800; color: #fff; background: #d9480f; white-space: nowrap; }
 
 /* Toast for errors */
 .toast {

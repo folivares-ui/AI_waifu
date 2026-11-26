@@ -60,6 +60,14 @@ describe("desktop tools", () => {
     for (const keys of [["ctrl", "alt", "delete"], ["win", "l"], ["rm -rf"], [], ["a", "b", "c", "d", "e"]]) expect(() => tool(tools, "desktop_key").describe!({ keys })).toThrow();
   });
 
+  it("screen actions can run under 'Darle el control', except shortcuts that delete, close, send or run things", async () => {
+    const tools = createDesktopTools(new DesktopClient(url, "tok"));
+    for (const n of ["desktop_click", "desktop_type", "desktop_key"]) expect(tool(tools, n).controllable).toBe(true);
+    const ask = (keys: string[]) => (tool(tools, "desktop_key").describe!({ keys }) as { alwaysAsk?: boolean }).alwaysAsk === true;
+    for (const keys of [["delete"], ["shift", "delete"], ["alt", "f4"], ["ctrl", "w"], ["win", "r"], ["ctrl", "shift", "esc"], ["ctrl", "enter"]]) expect(ask(keys)).toBe(true);
+    for (const keys of [["ctrl", "s"], ["enter"], ["ctrl", "b"], ["alt", "tab"], ["backspace"]]) expect(ask(keys)).toBe(false);
+  });
+
   it("explains a missing/forbidden desktop app", async () => {
     const bad = createDesktopTools(new DesktopClient(url, "wrong"));
     await expect(tool(bad, "desktop_screenshot").run({})).rejects.toThrow(/403/);

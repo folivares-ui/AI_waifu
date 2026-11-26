@@ -267,6 +267,14 @@ export function App() {
     window.addEventListener("waifu:toggle-mic", h);
     return () => window.removeEventListener("waifu:toggle-mic", h);
   }, []);
+  // Desktop shell: global shortcut (Ctrl+Shift+X) to take the screen back from her, from any program.
+  const revokeRef = useRef<() => void>(() => {});
+  revokeRef.current = soul.revokeControl;
+  useEffect(() => {
+    const h = () => revokeRef.current();
+    window.addEventListener("waifu:revoke-control", h);
+    return () => window.removeEventListener("waifu:revoke-control", h);
+  }, []);
 
   const toggleMic = async () => {
     if (listening) {
@@ -446,8 +454,19 @@ export function App() {
       <div className={`bottom${soul.approvals.length ? " asking" : ""}`}>
         <DialogBox name={soul.name} lines={dialog.lines} thinking={thinking} userText={lastUser} />
 
+        {soul.control && (
+          <div className="control-banner" role="status">
+            <span>
+              <strong>{short} tiene el control de tu pantalla</strong> hasta que termine lo que le pediste.
+              <small> Borrar, cerrar o enviar sigue preguntandote. Atajo para quitarselo: Ctrl + Mayus + X.</small>
+            </span>
+            <button type="button" onClick={soul.revokeControl}>
+              Quitar el control
+            </button>
+          </div>
+        )}
         {soul.approvals.map((r) => (
-          <ApprovalCard key={r.id} req={r} name={short} onAnswer={(ok) => soul.answerApproval(r.id, ok)} />
+          <ApprovalCard key={r.id} req={r} name={short} onAnswer={(ok, give) => soul.answerApproval(r.id, ok, give)} />
         ))}
 
         <div className="dock">

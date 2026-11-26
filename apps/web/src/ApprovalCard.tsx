@@ -6,7 +6,7 @@ type Req = Extract<ServerMessage, { type: "approval_request" }>;
  * Shown when she wants to change something (save a file, click, type, run a script). Nothing happens until the
  * user presses "Permitir". There is deliberately no keyboard default, so a stray Enter cannot approve.
  */
-export function ApprovalCard({ req, name, onAnswer }: { req: Req; name: string; onAnswer: (approved: boolean) => void }) {
+export function ApprovalCard({ req, name, onAnswer }: { req: Req; name: string; onAnswer: (approved: boolean, giveControl?: boolean) => void }) {
   return (
     <section className="approval" role="alertdialog" aria-labelledby={`ap-${req.id}`} aria-describedby={`apd-${req.id}`}>
       <p id={`ap-${req.id}`} className="approval-title">
@@ -26,6 +26,16 @@ export function ApprovalCard({ req, name, onAnswer }: { req: Req; name: string; 
           Permitir
         </button>
       </div>
+      {req.controllable && (
+        <button
+          type="button"
+          className="give-control"
+          title="Permite esta accion y las siguientes (clics, texto, teclas) sin preguntarte, hasta que termine lo que le pediste. Borrar, cerrar o enviar seguira preguntando. Puedes quitarselo cuando quieras."
+          onClick={() => onAnswer(true, true)}
+        >
+          Darle el control hasta que termine
+        </button>
+      )}
       <p className="approval-tool">Herramienta: {req.tool}</p>
     </section>
   );

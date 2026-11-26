@@ -68,6 +68,17 @@ export class DesktopClient {
 }
 
 const KEY_NAMES = /^(ctrl|control|shift|alt|win|meta|cmd|super|windows|enter|return|tab|esc|escape|backspace|delete|del|space|up|down|left|right|home|end|pageup|pagedown|f([1-9]|1[0-2])|.)$/i;
+/**
+ * Shortcuts that delete, close, run commands or open system tools: they ask even while she has control of the screen.
+ */
+const RISKY_COMBOS = [
+  /(^|\+)(delete|del)$/i, // deleting (files in the explorer, without the recycle bin with Shift)
+  /^alt\+f4$/i, // closing a program (maybe without saving)
+  /^(ctrl|control)\+w$/i, // closing a tab or document
+  /^(win|meta|super|windows)\+[rx]$/i, // Run dialog, power-user menu
+  /^(ctrl|control)\+shift\+(esc|escape)$/i, // task manager
+  /^(ctrl|control)\+(shift\+)?(enter|return)$/i, // send (mail, chat)
+];
 const DANGEROUS_COMBOS = [/^(ctrl|control)\+(alt)\+(delete|del)$/i, /^(win|meta|super|windows)\+l$/i];
 
 /**
@@ -105,6 +116,7 @@ export function createDesktopTools(d: DesktopClient): Tool[] {
 
   const click: Tool = {
     kind: "write",
+    controllable: true,
     def: {
       name: "desktop_click",
       description: "Click at a point of the last desktop_screenshot (image coordinates). The user sees a fresh screenshot with the point marked and must approve.",
@@ -135,6 +147,7 @@ export function createDesktopTools(d: DesktopClient): Tool[] {
 
   const type: Tool = {
     kind: "write",
+    controllable: true,
     def: {
       name: "desktop_type",
       description: "Type text into whatever has the keyboard focus on the user's screen (click the field first). Never type passwords or payment data. The user sees the exact text and must approve.",
@@ -154,6 +167,7 @@ export function createDesktopTools(d: DesktopClient): Tool[] {
 
   const key: Tool = {
     kind: "write",
+    controllable: true,
     def: {
       name: "desktop_key",
       description: "Press a key or shortcut on the user's computer, e.g. ['ctrl','s'], ['enter'], ['alt','tab']. The user must approve.",
@@ -166,7 +180,10 @@ export function createDesktopTools(d: DesktopClient): Tool[] {
       }
       const combo = keys.join("+");
       if (DANGEROUS_COMBOS.some((r) => r.test(combo))) throw new Error(`${combo} is not allowed.`);
-      return { summary: `Pulsar ${keys.map((k) => (k.length === 1 ? k.toUpperCase() : k[0].toUpperCase() + k.slice(1))).join("+")}` };
+      return {
+        summary: `Pulsar ${keys.map((k) => (k.length === 1 ? k.toUpperCase() : k[0].toUpperCase() + k.slice(1))).join("+")}`,
+        ...(RISKY_COMBOS.some((r) => r.test(combo)) ? { alwaysAsk: true } : {}),
+      };
     },
     async run(input) {
       await d.input({ action: "key", keys: (input as { keys: string[] }).keys });

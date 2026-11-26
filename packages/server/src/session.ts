@@ -99,7 +99,9 @@ export class Session {
   private watchMin: number;
   private now: () => number;
   private screenTimeout: number;
-  private approvalWaiters = new Map<string, (approved: boolean) => void>();
+  private approvalWaiters = new Map<string, (approved: boolean, control?: boolean) => void>();
+  /** The activity (turn) during which she has control of the screen ("Darle el control"), if any. */
+  private controlFor?: AbortController;
   private approvalTimeout: number;
   private actionLog: ActionLog;
 
@@ -128,6 +130,7 @@ export class Session {
     this.growth = growth;
     this.abort?.abort();
     for (const [, answer] of this.approvalWaiters) answer(false);
+    this.setControl(undefined);
     this.history = [];
     this.soul = soul;
     this.memory = memory;
@@ -144,6 +147,8 @@ export class Session {
         return this.hello();
       case "interrupt":
         return this.abort?.abort();
+      case "control_revoke":
+        return this.setControl(undefined);
       case "user_text": {
         const text = String(msg.text ?? "").trim().slice(0, MAX_INPUT_CHARS);
         if (!text) return;
@@ -164,7 +169,7 @@ export class Session {
       case "approval_response": {
         const w = this.approvalWaiters.get(String(msg.id));
         if (!w) return; // unknown, expired or already answered: never pre-approvable
-        w(msg.approved === true);
+        w(msg.approved === true, msg.approved === true && msg.control === true);
         return;
       }
       case "touch": {
@@ -216,24 +221,46 @@ export class Session {
     for (const w of this.screenWaiters.values()) w(undefined);
     this.screenWaiters.clear();
     for (const w of [...this.approvalWaiters.values()]) w(false);
+    this.controlFor = undefined;
   }
 
-  /** Shows the approval card and waits. Resolves false on "no", timeout or cancellation. */
-  private requestApproval(tool: string, info: ApprovalInfo, signal: AbortSignal): Promise<boolean> {
+  /** Gives her control of the screen for this activity (or takes it back: undefined), and tells the app. */
+  private setControl(turn: AbortController | undefined) {
+    const was = !!this.controlFor;
+    this.controlFor = turn;
+    if (was !== !!turn) this.send({ type: "control", active: !!turn });
+  }
+
+  /**
+   * Shows the approval card and waits. Resolves approved false on "no", timeout or cancellation; `control` when the
+   * user also gave her control of the screen (only offered when `controllable`).
+   */
+  private requestApproval(tool: string, info: ApprovalInfo, signal: AbortSignal, grantControl?: () => void): Promise<{ approved: boolean; control: boolean }> {
+    const controllable = !!grantControl;
     return new Promise((resolve) => {
       const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
-      const finish = (approved: boolean, cancelled: boolean) => {
+      const finish = (approved: boolean, cancelled: boolean, control = false) => {
         clearTimeout(timer);
         signal.removeEventListener("abort", onAbort);
         if (!this.approvalWaiters.delete(id)) return;
         if (cancelled) this.send({ type: "approval_cancel", id });
-        resolve(approved);
+        const given = approved && control && controllable;
+        if (given) grantControl!(); // right away: a "take it back" that follows must win
+        resolve({ approved, control: given });
       };
       const onAbort = () => finish(false, true);
       const timer = setTimeout(() => finish(false, true), this.approvalTimeout);
       signal.addEventListener("abort", onAbort);
-      this.approvalWaiters.set(id, (approved) => finish(approved, false));
-      this.send({ type: "approval_request", id, tool, summary: info.summary, ...(info.details ? { details: info.details } : {}), ...(info.preview ? { preview: info.preview } : {}) });
+      this.approvalWaiters.set(id, (approved, control) => finish(approved, false, control));
+      this.send({
+        type: "approval_request",
+        id,
+        tool,
+        summary: info.summary,
+        ...(info.details ? { details: info.details } : {}),
+        ...(info.preview ? { preview: info.preview } : {}),
+        ...(controllable ? { controllable: true } : {}),
+      });
     });
   }
 
@@ -417,8 +444,14 @@ export class Session {
               } catch (e) {
                 denied = `Error: ${e instanceof Error ? e.message : String(e)}`; // invalid request: never shown to the user
               }
-              if (info && !denied) {
-                const approved = await this.requestApproval(u.name, info, abort.signal);
+              // "Darle el control": while the user lets her drive the screen for this activity, her clicks, typing
+              // and keys run without asking (still logged). Anything else, and risky shortcuts, still ask.
+              const canControl = tool.controllable === true && !info?.alwaysAsk && !opts.proactive;
+              if (info && !denied && canControl && this.controlFor === abort && !abort.signal.aborted) {
+                info = { ...info, summary: `${info.summary} (con el control)` }; // logged with its outcome below
+              } else if (info && !denied) {
+                const answer = await this.requestApproval(u.name, info, abort.signal, canControl ? () => !abort.signal.aborted && this.setControl(abort) : undefined);
+                const approved = answer.approved;
                 if (!approved) {
                   this.actionLog.record({ tool: u.name, summary: info.summary, approved: false });
                   denied = abort.signal.aborted
@@ -471,6 +504,7 @@ export class Session {
     await chain;
     const interrupted = abort.signal.aborted;
     if (this.abort === abort) this.busy = false;
+    if (this.controlFor === abort) this.setControl(undefined); // the activity is over: control goes back to the user
     if (reply) this.history.push({ role: "assistant", content: reply });
     else this.history.pop(); // nothing was said (or she stayed silent); drop the dangling user message
     this.send({ type: "done", turnId, interrupted });

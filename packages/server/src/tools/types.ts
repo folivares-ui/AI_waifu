@@ -12,6 +12,8 @@ export interface ApprovalInfo {
   details?: string;
   /** Optional image, e.g. where she is about to click. */
   preview?: ScreenImage;
+  /** Asks even while she has control of the screen (e.g. a delete or close shortcut). */
+  alwaysAsk?: boolean;
 }
 
 export interface Tool {
@@ -27,6 +29,11 @@ export interface Tool {
    * it needs approval too, so hidden instructions in that content cannot smuggle your data out inside a URL.
    */
   egress?: boolean;
+  /**
+   * A screen action (click, type, key) that the user may let run without asking each time, by giving her control
+   * of the screen until the current activity ends ("Darle el control"). Other write tools always ask.
+   */
+  controllable?: boolean;
   /** Builds the approval card for this call. May validate the input and throw (the error goes to the model). */
   describe?(input: unknown): ApprovalInfo | Promise<ApprovalInfo>;
   /** Throwing is fine: the error text is returned to the model as a tool error. */

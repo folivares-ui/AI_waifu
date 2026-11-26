@@ -144,6 +144,8 @@ fn serde_json_string(s: &str) -> String {
 
 pub fn run() {
     let toggle = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
+    // Takes the screen back from her ("Darle el control") from any program, even when her window is hidden.
+    let revoke = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyX);
 
     let app = tauri::Builder::default()
         .plugin(
@@ -155,6 +157,11 @@ pub fn run() {
                             let _ = w.eval("window.dispatchEvent(new CustomEvent('waifu:toggle-mic'))");
                         }
                     }
+                    if shortcut == &revoke && event.state() == ShortcutState::Pressed {
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.eval("window.dispatchEvent(new CustomEvent('waifu:revoke-control'))");
+                        }
+                    }
                 })
                 .build(),
         )
@@ -162,6 +169,9 @@ pub fn run() {
         .setup(move |app| {
             if let Err(e) = app.global_shortcut().register(toggle) {
                 eprintln!("could not register Ctrl+Shift+Space: {e}"); // e.g. already taken by another app
+            }
+            if let Err(e) = app.global_shortcut().register(revoke) {
+                eprintln!("could not register Ctrl+Shift+X: {e}");
             }
             let handle = app.handle().clone();
             std::thread::spawn(move || {
