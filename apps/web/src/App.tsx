@@ -647,6 +647,12 @@ export function App() {
                 <small>Ctrl + Mayus + Espacio activa o desactiva el microfono desde cualquier programa.</small>
               </span>
             </div>
+            <div className="row info">
+              <span>
+                Version
+                <small>{typeof __APP_BUILD__ === "string" ? __APP_BUILD__ : "desarrollo"}</small>
+              </span>
+            </div>
           </section>
         </div>
       )}
