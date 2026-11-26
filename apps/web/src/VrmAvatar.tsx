@@ -352,6 +352,10 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
       const bodyEmotion = devBody?.__bodyEmotion ?? p.emotion;
       const body = bodyPose({ t, emotion: bodyEmotion, speaking: devBody?.__bodySpeaking ?? p.speaking, level: voiceLevel, listening: p.listening, arms: armPoses, style: (import.meta.env.DEV ? (window as unknown as { __bodyStyle?: MotionStyle }).__bodyStyle : undefined) ?? p.motion });
       const follow = Math.min(1, dt * 4.5); // ~0.3 s to settle into a new pose
+      // Turning away when shy: the whole body turns, from the hips up (hips, waist and chest share it), as a
+      // person does. All of it on the spine would wring her waist, and a long skirt or coat hanging from the
+      // hips would stay facing forward while the rest turned.
+      const turnAway = re?.shrink && reaction ? 0.32 * reaction.side * env : 0;
       for (const name of BODY_BONES) {
         const e = body[name];
         const b = vrm.humanoid.getNormalizedBoneNode(name as never);
@@ -367,7 +371,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         const extra =
           name === "leftUpperArm" ? (open?.left ?? 0) * armK + armLift.left : name === "rightUpperArm" ? -(open?.right ?? 0) * armK + armLift.right : 0;
         st[0] = step(st[0], e[0] * armK);
-        st[1] = step(st[1], e[1]);
+        st[1] = step(st[1], e[1] + (name === "hips" ? 0.4 * turnAway : 0));
         st[2] = step(st[2], e[2] * armK + extra);
         poseState.set(name, st);
         b.rotation.set(st[0], st[1], st[2]);
@@ -408,13 +412,13 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
       if (spine) {
         // steps back when shy; leans in a little while listening
         spine.rotation.x = lerp(spine.rotation.x, Math.sin(t * 1.5) * 0.012 - 0.16 * shrinkK + (body.spine?.[0] ?? 0) * armK, dt * 6);
-        spine.rotation.y = lerp(spine.rotation.y, 0.32 * (reaction?.side ?? 1) * shrinkK + (body.spine?.[1] ?? 0), dt * 5); // turns away / twists
+        spine.rotation.y = lerp(spine.rotation.y, 0.35 * turnAway + (body.spine?.[1] ?? 0), dt * 5); // turns away (with the hips and chest) / twists
         spine.rotation.z = lerp(spine.rotation.z, (body.spine?.[2] ?? 0) * armK, follow); // stays upright over the shifting hips
       }
       const chest = vrm.humanoid.getNormalizedBoneNode("chest");
       if (chest) {
         chest.rotation.x = lerp(chest.rotation.x, Math.sin(t * 1.5 + 0.4) * 0.01 + (body.chest?.[0] ?? 0) * armK, follow);
-        chest.rotation.y = lerp(chest.rotation.y, body.chest?.[1] ?? 0, follow);
+        chest.rotation.y = lerp(chest.rotation.y, 0.25 * turnAway + (body.chest?.[1] ?? 0), follow);
         chest.rotation.z = lerp(chest.rotation.z, (body.chest?.[2] ?? 0) * armK, follow);
       }
 
