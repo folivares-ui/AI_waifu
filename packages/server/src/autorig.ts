@@ -836,7 +836,10 @@ export function autoRig(json: RigGltf, binIn: Buffer): RigResult {
         const [b, yb] = chain[i + 1];
         if (y <= yb) {
           // (clothes up the neck, a high collar, follow the head only a little: it turns inside them)
-          const t = smooth((y - ya) / (yb - ya)) * (b === "head" ? COLLAR_HEAD : 1);
+          // (straight blend up the spine: a turn of the upper body spreads evenly over the waist instead of
+          // twisting in a band at each joint)
+          const f = (y - ya) / (yb - ya);
+          const t = (b === "head" ? smooth(f) * COLLAR_HEAD : f);
           put(a, k * (1 - t));
           put(b, k * t);
           return;

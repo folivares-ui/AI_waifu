@@ -156,9 +156,9 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
         if (o) chain.push(o);
       }
       const first = chain[chain.length > 4 ? 2 : 1];
-      // Long hair falls a little backwards, towards the shoulder blades (in the game it rests on the back; some
-      // models have it flaring out to the sides, standing out like wings beside the arms). The same for every long
-      // lock: neighbouring locks share the strands between them, and pulled apart they would tear them.
+      // Long hair keeps the shape it was modelled in (some designs spread out on purpose, like feathers or a wing
+      // behind her), only leaning a little back and swinging gently. The same for every long lock: neighbouring
+      // locks share the strands between them, and moved apart they would tear them.
       const long = chain[chain.length - 1].getWorldPosition(new THREE.Vector3()).y < shoulderLine - 0.08 * size;
       for (let o: THREE.Object3D | undefined = first; o; ) {
         const next: THREE.Object3D | undefined = o.children.find((c) => /^rig_hair_\d+_\d+$/.test(c.name));
@@ -167,7 +167,7 @@ export function addSpringChains(vrm: VRM): VRMSpringBoneManager | undefined {
         const d = next.getWorldPosition(new THREE.Vector3()).sub(o.getWorldPosition(new THREE.Vector3())).normalize();
         const hang = Math.max(0, -d.y);
         const settings = long
-          ? { stiffness: 0.6 + (1 - hang) * 1.5, dragForce: 0.4, gravityPower: 0.3, gravityDir: BACK_DOWN, hitRadius: 0.02 * size }
+          ? { stiffness: 1.0 + (1 - hang) * 3, dragForce: 0.4, gravityPower: 0.12, gravityDir: BACK_DOWN, hitRadius: 0.02 * size }
           : { stiffness: 0.55 + (1 - hang) * 3, dragForce: 0.35, gravityPower: 0.35 * hang * hang, gravityDir: new THREE.Vector3(0, -1, 0), hitRadius: 0.02 * size };
         const high = next.getWorldPosition(new THREE.Vector3()).y > shoulderLine - 0.08 * size;
         mgr.addJoint(new VRMSpringBoneJoint(o, next, settings, [high ? upperGroup : group])); // (a lock of hair is about this thick)
