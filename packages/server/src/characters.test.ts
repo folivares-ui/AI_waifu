@@ -92,4 +92,15 @@ describe("characters", () => {
     const readies = out.filter((m) => m.type === "ready") as Extract<ServerMessage, { type: "ready" }>[];
     expect(readies.map((r) => r.soul.name)).toEqual(["Rice Shower", "Agnes Tachyon"]);
   });
+
+  it("every shipped character answers with her own personality (her own persona and name in the prompt)", async () => {
+    const { buildSystemPrompt } = await import("./soul.js");
+    const { c } = setup();
+    const prompts = c.list().map((x) => ({ x, p: buildSystemPrompt(c.load(x.id), []) }));
+    for (const { x, p } of prompts) {
+      expect(p).toContain(`Your name is ${c.load(x.id).name}.`);
+      expect(p.startsWith(c.load(x.id).persona)).toBe(true);
+    }
+    expect(new Set(prompts.map(({ x }) => c.load(x.id).persona)).size).toBe(prompts.length); // all different
+  });
 });

@@ -53,7 +53,9 @@ export class MockProvider implements LLMProvider {
     }
     // Test aid: "emo:sad" in the message makes the mock answer with that emotion tag.
     const emo = last.match(/\bemo:([a-z]+)/)?.[1] ?? "happy";
-    const reply = `[emotion:${emo}] Te escuche decir: ${last}. Soy el cerebro de prueba, configura un proveedor real para conversar de verdad.`;
+    // (says who is answering: with no real brain every character answers the same way, which is not her personality)
+    const who = req.system.match(/Your name is ([^.\n]+)\./)?.[1]?.trim();
+    const reply = `[emotion:${emo}] ${who ? `(${who}, modo de prueba) ` : ""}Te escuche decir: ${last}. Soy el cerebro de prueba: sin un proveedor real todos los personajes responden igual. Configura uno (LLM_PROVIDER) para que hable con su propia personalidad.`;
     for (const word of reply.split(/(?<= )/)) {
       if (req.signal?.aborted) return;
       await new Promise((r) => setTimeout(r, 25));
