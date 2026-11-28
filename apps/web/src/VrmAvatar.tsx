@@ -98,6 +98,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
     let armPoses: ArmSolutions = {};
     let torso: TorsoGuard | undefined;
     let armLift = { left: 0, right: 0 };
+    let autoRigged = false; // skeleton made by the app (see the shoulder sharing in the loop)
     /** Extra outward opening of the hanging arms per mood, measured on her body at load. */
     const clearance: Partial<Record<Emotion, { left: number; right: number }>> = {};
     let voiceLevelSmooth = 0;
@@ -172,6 +173,7 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         const tooned = toonify(v);
         setToonBrightness(v, live.current.look?.brightness ?? 1);
         rig = BoneFaceRig.detect(v); // must run in the rest pose
+        autoRigged = !!v.humanoid.getRawBoneNode("hips")?.name.startsWith("rig_");
         armLift = measureArmLift(v); // A-pose models: lift the arms back to the T-pose the poses are written for
         torso = TorsoGuard.measure(v); // her real body shape, so the arms never go through it
         armPoses = solveArmPoses(v, torso, armLift.left); // hands on the hips, at the chin... for her proportions, outside her body
@@ -375,6 +377,23 @@ export function VrmAvatar({ data, ...props }: AvatarProps & { data: ArrayBuffer 
         st[2] = step(st[2], e[2] * armK + extra);
         poseState.set(name, st);
         b.rotation.set(st[0], st[1], st[2]);
+      }
+      // Skeletons made by the app (rig_*): the collarbone goes with the arm a little, as a person's does, so the
+      // skin of the shoulder is not stretched by the whole arm turning about one point. Part of the arm's turn
+      // (down / forward) moves to the shoulder bone; the arm ends up pointing the same way.
+      if (autoRigged) {
+        for (const side of ["left", "right"] as const) {
+          const ua = vrm.humanoid.getNormalizedBoneNode(`${side}UpperArm` as never);
+          const sh = vrm.humanoid.getNormalizedBoneNode(`${side}Shoulder` as never);
+          if (!ua || !sh) continue;
+          const share = (v: number, max: number) => Math.max(-max, Math.min(max, v * 0.3));
+          const sz = share(ua.rotation.z, 0.18);
+          const sx = share(ua.rotation.x, 0.12);
+          sh.rotation.z += sz;
+          sh.rotation.x += sx;
+          ua.rotation.z -= sz;
+          ua.rotation.x -= sx;
+        }
       }
       // Fingers: curled by mood, bending towards the palm (normalized bones: about z, opposite sign per hand).
       {
