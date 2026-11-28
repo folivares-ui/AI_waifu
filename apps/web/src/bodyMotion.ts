@@ -97,7 +97,10 @@ const add = (a: Euler3 | undefined, b: Euler3): Euler3 => (a ? [a[0] + b[0], a[1
 
 /** Target pose for this instant: mood pose + breathing/idle sway + weight shift + talking gestures. */
 export function bodyPose(s: BodyState): BodyPose {
-  const pose: BodyPose = { ...(calibrated(s.emotion, s.arms) ?? EMOTION_POSES[s.emotion]) };
+  // Her own standing pose, if her soul file has one, in place of the generic neutral pose.
+  const own = s.style?.idlePose;
+  const pose: BodyPose = s.emotion === "neutral" && own ? { ...EMOTION_POSES.neutral, ...own } : { ...(calibrated(s.emotion, s.arms) ?? EMOTION_POSES[s.emotion]) };
+  const base = (b: BodyBone): Euler3 => pose[b] ?? [0, 0, 0];
   const energy = s.style?.energy ?? 1;
   const bounceAmt = s.style?.bounce ?? 0;
   const fidgetAmt = s.style?.fidget ?? 0;
@@ -141,10 +144,10 @@ export function bodyPose(s: BodyState): BodyPose {
   // (the free leg bends less too: under a long skirt a thigh coming forward pushes through it)
   const freeL = Math.max(0, -shift) * hipK;
   const freeR = Math.max(0, shift) * hipK;
-  pose.leftUpperLeg = [-0.07 * freeL, 0, -0.035 * shift];
-  pose.leftLowerLeg = [0.16 * freeL, 0, 0];
-  pose.rightUpperLeg = [-0.07 * freeR, 0, -0.035 * shift];
-  pose.rightLowerLeg = [0.16 * freeR, 0, 0];
+  pose.leftUpperLeg = add(base("leftUpperLeg"), [-0.07 * freeL, 0, -0.035 * shift]);
+  pose.leftLowerLeg = add(base("leftLowerLeg"), [0.16 * freeL, 0, 0]);
+  pose.rightUpperLeg = add(base("rightUpperLeg"), [-0.07 * freeR, 0, -0.035 * shift]);
+  pose.rightLowerLeg = add(base("rightLowerLeg"), [0.16 * freeR, 0, 0]);
 
   // Bounce in the knees: when happy, and always for restless characters (bounce > 0).
   const bounce = (s.emotion === "happy" ? Math.max(1, bounceAmt * 1.3) : bounceAmt) * hipK;
@@ -159,7 +162,7 @@ export function bodyPose(s: BodyState): BodyPose {
   // Fidgeting (restless characters): every few seconds one small spontaneous move, eased in and out.
   // (only from a pose with the arms hanging: added to hands already placed somewhere, at the chest, together in
   // front, it would twist the arm into a shape no elbow makes)
-  const hanging = s.emotion === "neutral" || s.emotion === "happy";
+  const hanging = (s.emotion === "neutral" && !own) || s.emotion === "happy";
   if (fidgetAmt > 0 && !s.speaking && s.emotion !== "angry" && s.emotion !== "thinking") {
     const slot = Math.floor(t / 3.2);
     const phase = (t / 3.2) % 1;

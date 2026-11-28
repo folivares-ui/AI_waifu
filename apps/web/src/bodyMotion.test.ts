@@ -4,6 +4,14 @@ import { bodyPose, EMOTION_POSES } from "./bodyMotion";
 const at = (t: number, over: Partial<Parameters<typeof bodyPose>[0]> = {}) => bodyPose({ t, emotion: "neutral", speaking: false, level: 0, listening: false, ...over });
 
 describe("body language", () => {
+  it("a character's own standing pose (soul file) replaces the neutral one, with the idle motion on top", () => {
+    const idlePose = { leftUpperArm: [0.8, -0.3, -0.2] as [number, number, number], leftUpperLeg: [0.1, 0, 0.16] as [number, number, number] };
+    const p = at(2, { style: { idlePose } });
+    expect(Math.abs(p.leftUpperArm![0] - 0.8)).toBeLessThan(0.1); // her pose, plus a small sway
+    expect(Math.abs(p.leftUpperLeg![2] - 0.16)).toBeLessThan(0.1); // the legs keep it too (weight shift added)
+    expect(at(2).leftUpperArm![0]).toBeLessThan(0.2); // others keep the generic pose
+    expect(at(2, { style: { idlePose }, emotion: "angry" }).leftUpperArm).toEqual(at(2, { emotion: "angry" }).leftUpperArm); // moods still show
+  });
   it("is never frozen: arms sway and the weight shifts between the legs over time", () => {
     const a = at(1), b = at(4);
     expect(a.leftUpperArm).not.toEqual(b.leftUpperArm);

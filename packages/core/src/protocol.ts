@@ -109,7 +109,18 @@ export interface MotionStyle {
   armRelax?: number;
   /** How much the hips sway and turn (0..1, default 1). Low for a long skirt or coat that would swing around the legs. */
   hipSway?: number;
+  /**
+   * Her own standing pose (replaces the neutral one): rotation of each body bone from the T-pose, Euler XYZ in
+   * radians, VRM 1.0 normalized frame (e.g. converted from a pose file). Breathing, sways and gestures go on top.
+   */
+  idlePose?: Partial<Record<IdlePoseBone, [number, number, number]>>;
 }
+
+export const IDLE_POSE_BONES = [
+  "hips", "spine", "chest", "leftShoulder", "rightShoulder", "leftUpperArm", "rightUpperArm", "leftLowerArm", "rightLowerArm",
+  "leftHand", "rightHand", "leftUpperLeg", "rightUpperLeg", "leftLowerLeg", "rightLowerLeg",
+] as const;
+export type IdlePoseBone = (typeof IDLE_POSE_BONES)[number];
 
 export interface VoiceHints {
   /** BCP-47 language tag used for browser STT/TTS, e.g. "es-ES". */
